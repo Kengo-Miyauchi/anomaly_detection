@@ -4,7 +4,7 @@ import numpy as np
 import os
 import gc
 import pickle
-from util_module.data_to_plot import plot_by_date
+from util_module.data_to_plot import plot_by_date,calc_scores
 from util_module.end_info import show_info
 from util_module.tabnet_feature import data_to_TabNetFeatures
 from util_module.build_exec_model import ExecModel
@@ -13,12 +13,13 @@ from wind_module import utils
 
 # set device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-#os.environ['CUDA_LAUNCH_BLOCKING'] = "1"b
+#os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '1S'
+frequency = '10M'
+threshold_line = 100 - 0.001
 dataset_name = "haenkaze"
 if(frequency=='1S' or 'sampled' in frequency):
     parquet_file = f'data/{dataset_name}/2023_'+frequency+'_data.parquet'
@@ -64,17 +65,16 @@ del X_train
 del X_test
 print("Finish feature extraction")
 
-from sklearn.mixture import GaussianMixture
-import numpy as np
-
 event_files = ["data/haenkaze/events.csv"]
 event_files.append("data/haenkaze/event_range.csv")
-score_file = "result/haenkaze/tabnet-gmm/"+frequency+"scores.csv"
+score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
 #os.makedirs(score_file, exist_ok=True)
 n_components = 10
 
-
-gmm_model = f"model/haenkaze/gmm_{frequency}.pkl"
+from sklearn.mixture import GaussianMixture
+path_to_gmm = f"model/haenkaze/{model_name}"
+os.makedirs(path_to_gmm, exist_ok=True)
+gmm_model = f"{path_to_gmm}/gmm_{frequency}.pkl"
 if os.path.exists(gmm_model):
     print(f"Load from {gmm_model}")
     with open(gmm_model, "rb") as file:
@@ -86,23 +86,35 @@ else:
     print("Finish GMM Training")
     with open(gmm_model, "wb") as file:
         pickle.dump(gmm, file)
-    print("Model saved as gmm_model.pkl")  
+    print(f"Model saved as {gmm_model}")  
 
 log_likelihood = -gmm.score_samples(feature_train)
-threshold_line = 100 - 0.001
 threshold = np.percentile(log_likelihood,threshold_line)
 #threshold = max(log_likelihood)
 del feature_train
 anomaly_score = -gmm.score_samples(feature_test)
+df = pd.DataFrame({"DATETIME": timestamp, "AnomalyScore": anomaly_score})
+if(not(pd.api.types.is_datetime64_any_dtype(df['DATETIME']))):
+    df['DATETIME'] = pd.to_datetime(df['DATETIME'],format='%d/%m/%y %H')
+# 外れ値の除去
+num_remove = 15
+# AnomalyScore列の上位num_remove個のインデックスと値を取得
+remove_indices = df.nlargest(num_remove, 'AnomalyScore').index
+# データフレームから削除
+df = df.drop(remove_indices) 
+df['Date'] = df['DATETIME'].dt.date
 
 #import pdb; pdb.set_trace()
 
 #img_path = out_dir + "/"+frequency+"_gmm_" + str(n_components) + "components.png"
-img_path = f"{out_dir}/{frequency}.png"
-plot_by_date(False,anomaly_score,timestamp,train_range,threshold,img_path,frequency,event_files,score_file=score_file)
+log_plot = False
+if log_plot:img_path = f"{out_dir}/{frequency}_log.png"
+else:img_path = f"{out_dir}/{frequency}.png"
+plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files)
+print(f"Threshold line: {threshold_line}%")
+calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7)
 print(f"result: {img_path}")
 show_info(out_dir,exec_model)
-print(f"Threshold line: {threshold_line}%")
 print(f"Score result: {score_file}")
 
 """ event_file = "data/haenkaze/events.csv"

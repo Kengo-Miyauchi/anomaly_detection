@@ -3,8 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import gc
-from util_module.gmm_module import calc_AnomalyScore
-from util_module.data_to_plot import plot_by_date
+from util_module.data_to_plot import plot_by_date, calc_scores
 from util_module.end_info import show_info
 from util_module.tabnet_feature import create_dataloader, data_to_framedFeatures
 from util_module.build_exec_model import ExecModel
@@ -20,6 +19,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 dataset_name = "haenkaze"
 stampcol = "DateTime"
 frequency = '1S'
+isTrain = True
+num_frame = 5
+threshold_line = 100 - 0.001
 if(frequency=='1S' or 'sampled' in frequency):
     parquet_file = f'data/{dataset_name}/2023_'+frequency+'_data.parquet'
 else:
@@ -47,14 +49,13 @@ gc.collect()
 
 
 # set execute model
-model_name = "tabnet-gmm-3frame"
+model_name = f"tabnet-gmm-{num_frame}frame"
 config = set_config_file()
 exec_model = ExecModel(device,config,dataset_name,model_name,X_train)
 out_dir = exec_model.out_dir
 
 
 # convert data to tabnet encoder features
-num_frame = 3
 print("Start Feature Extraction")
 feature_train = data_to_framedFeatures(exec_model,X_train,num_frame,True)
 del X_train
@@ -62,14 +63,26 @@ print("Finish Feature Extraction")
 
 from sklearn.mixture import GaussianMixture
 import numpy as np
+import pickle
 n_components = 10
-print("GMM Training")
-gmm = GaussianMixture(n_components=n_components, covariance_type=exec_model.covariance_type, random_state=42, n_init=10, max_iter=500)
-gmm.fit(feature_train)
+path_to_gmm = f"model/haenkaze/{model_name}"
+os.makedirs(path_to_gmm, exist_ok=True)
+gmm_model = f"{path_to_gmm}/gmm_{frequency}.pkl"
+if os.path.exists(gmm_model) and (not isTrain):
+    print(f"Load from {gmm_model}")
+    with open(gmm_model, "rb") as file:
+        gmm = pickle.load(file)
+else:
+    print("GMM Training")
+    gmm = GaussianMixture(n_components=n_components, covariance_type=exec_model.covariance_type, random_state=42, n_init=10, max_iter=25)
+    gmm.fit(feature_train)
+    print("Finish GMM Training")
+    with open(gmm_model, "wb") as file:
+        pickle.dump(gmm, file)
+    print(f"Model saved as {gmm_model}")  
 log_likelihood = -gmm.score_samples(feature_train)
-threshold = np.percentile(log_likelihood,99.9)
+threshold = np.percentile(log_likelihood,threshold_line)
 del feature_train, log_likelihood
-print("Finish GMM Training")
 
 print("Start Test Calculation")
 #feature_test = data_to_framedFeatures(exec_model,X_test,num_frame,False)
@@ -107,9 +120,27 @@ for batch_index, batch in enumerate(dataloader):
 del X_test
 print("Finish Test Calculation")
 
-event_files = ["data/haenkaze/events.csv","data/haenkaze/event_range.csv"]
-score_file = "result/haenkaze/tabnet-gmm/"+frequency+"scores.csv"
-img_path = out_dir + "/"+frequency+"_3frame_gmm_" + str(n_components) + "components.png"
-plot_by_date(exec_model.log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files,score_file)
+df = pd.DataFrame({"DATETIME": timestamp, "AnomalyScore": anomaly_score})
+if(not(pd.api.types.is_datetime64_any_dtype(df['DATETIME']))):
+    df['DATETIME'] = pd.to_datetime(df['DATETIME'],format='%d/%m/%y %H')
+# 外れ値の除去
+num_remove = 15
+# AnomalyScore列の上位num_remove個のインデックスと値を取得
+remove_indices = df.nlargest(num_remove, 'AnomalyScore').index
+# データフレームから削除
+df = df.drop(remove_indices) 
+df['Date'] = df['DATETIME'].dt.date
+
+
+event_files = ["data/haenkaze/events.csv"]
+event_files.append("data/haenkaze/event_range.csv")
+score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
+log_plot = False
+if log_plot:img_path = f"{out_dir}/{frequency}_log.png"
+else:img_path = f"{out_dir}/{frequency}.png"
+plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files)
+print(f"Threshold line: {threshold_line}%")
+calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7)
 print(f"result: {img_path}")
 show_info(out_dir,exec_model)
+print(f"Score result: {score_file}")

@@ -71,7 +71,7 @@ event_files = ["data/haenkaze/events.csv","data/haenkaze/event_range.csv"]
 score_file = "result/haenkaze/tabnet-only/"+frequency+"scores.csv"
 img_path = out_dir + "/tabnet-only_"+frequency+".png"
 
-plot_by_date(False,reconstruction_errors,timestamp,train_range,threshold,img_path,frequency,event_files,score_file)
+plot_by_date(False,reconstruction_errors,timestamp,train_range,threshold,img_path,event_files)
 print(f"result: {img_path}")
 #show_info(out_dir,exec_model)
 print(f"Score result: {score_file}")

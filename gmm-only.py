@@ -49,7 +49,7 @@ if not use_pca:
     X_test = X_test.astype(np.float16)
 
 event_files = ["data/haenkaze/events.csv"]
-#event_files.append("data/haenkaze/event_range.csv")
+event_files.append("data/haenkaze/event_range.csv")
 score_file = "result/haenkaze/gmm-only/"+frequency+"scores.csv"
 n_components=10
 covariance_type="full"
@@ -57,7 +57,8 @@ log_plot=False
 out_dir="result/haenkaze/gmm-only"
 
 from sklearn.mixture import GaussianMixture
-print("GMM Training")
+import pickle
+#print("GMM Training")
 if use_pca:
     from sklearn.decomposition import PCA
     #主成分分析の実行
@@ -75,8 +76,19 @@ else:
     feature_train=X_train
     feature_test=X_test
 
-gmm = GaussianMixture(n_components=n_components, covariance_type=covariance_type, random_state=42, n_init=10, max_iter=25)
-gmm.fit(feature_train)
+gmm_model = f"model/haenkaze/gmm/{frequency}.pkl"
+if os.path.exists(gmm_model):
+    print(f"Load from {gmm_model}")
+    with open(gmm_model, "rb") as file:
+        gmm = pickle.load(file)
+else:
+    print("GMM Training")
+    gmm = GaussianMixture(n_components=n_components, covariance_type=covariance_type, random_state=42, n_init=10, max_iter=25)
+    gmm.fit(feature_train)
+    print("Finish GMM Training")
+    with open(gmm_model, "wb") as file:
+        pickle.dump(gmm, file)
+    print("Model saved as gmm_model.pkl")  
 log_likelihood = -gmm.score_samples(feature_train)
 threshold = np.percentile(log_likelihood,99.9)
 del feature_train
@@ -84,6 +96,6 @@ print("Finish GMM Training")
 img_path = out_dir + "/"+frequency+"gmm_" + str(n_components) + "components.png"
 anomaly_score = -gmm.score_samples(feature_test)
 del feature_test
-plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,frequency,event_files,score_file)
+plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files)
 print(f"result: {img_path}")
 print(f"Score result: {score_file}")
