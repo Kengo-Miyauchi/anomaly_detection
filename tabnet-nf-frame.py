@@ -6,10 +6,10 @@ import gc
 from util_module.create_dataloader import create_dataloader
 from util_module.data_to_plot import plot_by_date
 from util_module.end_info import show_info
-from util_module.tabnet_feature import data_to_TabNetFeatures
-from util_module.build_exec_model import ExecModel
-from util_module.set_config import set_config_file
-from wind_module import utils
+from util_module.tabnet.tabnet_feature import data_to_TabNetFeatures
+from util_module.tabnet.build_exec_model import ExecModel
+from util_module.tabnet.set_config import set_config_file
+from util_module import SCADA_utils
 
 # set device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -30,8 +30,8 @@ stampcol = "DateTime"
 #data[stampcol] = pd.to_datetime(data[stampcol])
 train_range = ('2023-04-01','2023-04-30')
 test_range = ('2023-04-01','2023-09-30')
-train = utils.extract_specific_terms(data,train_range[0],train_range[1],stampcol)
-test = utils.extract_specific_terms(data,test_range[0],test_range[1],stampcol)
+train = SCADA_utils.extract_specific_terms(data,train_range[0],train_range[1],stampcol)
+test = SCADA_utils.extract_specific_terms(data,test_range[0],test_range[1],stampcol)
 timestamp = test[stampcol]
 
 X_train = train.drop(columns=['DateTime',' 日付ﾌｫｰﾏｯﾄ 時分秒']).values

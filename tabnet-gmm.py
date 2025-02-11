@@ -6,10 +6,10 @@ import gc
 import pickle
 from util_module.data_to_plot import plot_by_date,calc_scores
 from util_module.end_info import show_info
-from util_module.tabnet_feature import data_to_TabNetFeatures
-from util_module.build_exec_model import ExecModel
-from util_module.set_config import set_config_file
-from wind_module import utils
+from util_module.tabnet.tabnet_feature import data_to_TabNetFeatures
+from util_module.tabnet.build_exec_model import ExecModel
+from util_module.tabnet.set_config import set_config_file
+from util_module import SCADA_utils
 
 # set device
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
@@ -19,7 +19,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # download data
 stampcol = "DateTime"
 frequency = '10M'
-threshold_line = 100 - 0.001
+threshold_line = 100 - 0.01
 dataset_name = "haenkaze"
 if(frequency=='1S' or 'sampled' in frequency):
     parquet_file = f'data/{dataset_name}/2023_'+frequency+'_data.parquet'
@@ -28,15 +28,15 @@ else:
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 #data = utils.fix_data(data)
-data = utils.arrange_data(data,stampcol)
+data = SCADA_utils.arrange_data(data,stampcol)
 print("Finished loading data.")
 
 # preprocessing
 #data[stampcol] = pd.to_datetime(data[stampcol])
 train_range = ('2023-04-01','2023-04-30')
 test_range = ('2023-04-01','2023-09-30')
-train = utils.extract_specific_terms(data,train_range[0],train_range[1],stampcol)
-test = utils.extract_specific_terms(data,test_range[0],test_range[1],stampcol)
+train = SCADA_utils.extract_specific_terms(data,train_range[0],train_range[1],stampcol)
+test = SCADA_utils.extract_specific_terms(data,test_range[0],test_range[1],stampcol)
 timestamp = test[stampcol]
 del data
 
