@@ -8,8 +8,8 @@ import os
 class ExecModel:
     def __init__(self, device, config, dataset_name, model_name, X_train, X_valid=None, refit=False,
                  feature_dim=None, n_steps=None, optimizer_params=None, batch_size_pre=None, batch_size_tr=None,
-                 covariance_type=None, pretraining_ratio=None, max_epochs=None,
-                 path_to_pretrained=None):
+                 covariance_type=None, pretraining_ratio=None, max_epochs=None,path_to_pretrained=None,
+                 use_self_attn=False, sequence_length=None):
         self.device = device
         self.config = config
         self.dataset_name = dataset_name
@@ -25,7 +25,9 @@ class ExecModel:
         self.covariance_type = covariance_type
         self.pretraining_ratio = pretraining_ratio
         self.max_epochs = max_epochs
-        self.path_to_pretrained=path_to_pretrained
+        self.path_to_pretrained = path_to_pretrained
+        self.use_self_attn = use_self_attn
+        self.sequence_length = sequence_length
         
         # configとlogの設定
         self.set_params_from_file(config)
@@ -65,6 +67,8 @@ class ExecModel:
             n_d = self.feature_dim,
             n_a = self.feature_dim,
             verbose=100,
+            use_self_attn = self.use_self_attn,
+            sequence_length = self.sequence_length
             #warm_start=self.refit,
         )
         return unsupervised_model
