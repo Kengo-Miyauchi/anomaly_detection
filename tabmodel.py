@@ -8,15 +8,17 @@ from util_module.tabnet.set_config import set_config_file
 from util_module import SCADA_utils
 
 # set device
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 #os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 dataset_name = "haenkaze"
+data_path = "/mnt/work-qnap/miyauchi"
 
 # preprocessing
-parquet_file = f'data/{dataset_name}/2024_fixed.parquet'
+target_file = f'{data_path}/data/{dataset_name}/fixed_data/2023_fixed.parquet'
+parquet_file = f'{data_path}/data/{dataset_name}/fixed_data/2024_fixed.parquet'
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 stampcol = "DateTime"
@@ -31,20 +33,21 @@ del valid
 gc.collect()
 print("Finished loading data.")
 
-data_dir ='data/haenkaze/fixed_data'
+data_dir =f'{data_path}/data/haenkaze/fixed_data'
 file_list = [os.path.join(data_dir, file) for file in os.listdir(data_dir)]
 for file_path in file_list:
-    print(f"Loading data from {file_path}...")
-    df = pd.read_parquet(file_path)
-    df.fillna(method="ffill",inplace=True)
-    data = df.drop(columns=['DateTime',' 日付ﾌｫｰﾏｯﾄ 時分秒']).values
-    if(np.isnan(data).any() or np.isinf(data).any()):
-        print(f"isNAN: {np.isnan(data).any()}")
-        print(f"isINF: {np.isinf(data).any()}")
-    X_train = np.concatenate([X_train,data])
-    del df,data
-    print("Finished loading data.")
-    gc.collect()
+    if((file_path != parquet_file) and (file_path != target_file)):
+        print(f"Loading data from {file_path}...")
+        df = pd.read_parquet(file_path)
+        df.fillna(method="ffill",inplace=True)
+        data = df.drop(columns=['DateTime',' 日付ﾌｫｰﾏｯﾄ 時分秒']).values
+        if(np.isnan(data).any() or np.isinf(data).any()):
+            print(f"isNAN: {np.isnan(data).any()}")
+            print(f"isINF: {np.isinf(data).any()}")
+        X_train = np.concatenate([X_train,data])
+        del df,data
+        print("Finished loading data.")
+        gc.collect()
 
 # set execute model
 model_name = "tabnet-pretrain-out2023"

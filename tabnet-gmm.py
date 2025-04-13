@@ -12,7 +12,7 @@ from util_module.tabnet.set_config import set_config_file
 from util_module import SCADA_utils
 
 # set device
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+#os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 #os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -21,10 +21,11 @@ stampcol = "DateTime"
 frequency = '10M'
 threshold_line = 100 - 0.01
 dataset_name = "haenkaze"
+data_path = "/mnt/work-qnap/miyauchi"
 if(frequency=='1S' or 'sampled' in frequency):
-    parquet_file = f'data/{dataset_name}/2023_'+frequency+'_data.parquet'
+    parquet_file = f'{data_path}/data/{dataset_name}/2023_'+frequency+'_data.parquet'
 else:
-    parquet_file = f'data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
+    parquet_file = f'{data_path}/data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 #data = utils.fix_data(data)
