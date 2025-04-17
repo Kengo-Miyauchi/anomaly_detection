@@ -1,0 +1,4 @@
+2025-04-16 14:28:12,556 - INFO - Starting TabNet pretraining...
+2025-04-16 16:09:42,776 - INFO - epoch   1 | loss:  463.1953,  val_0_unsup_loss_numpy:11414.6719
+2025-04-16 19:12:57,741 - INFO - epoch   2 | loss:  171.1046,  val_0_unsup_loss_numpy: 1442.6459
+2025-04-16 22:52:26,082 - INFO - epoch   3 | loss:   23.5975,  val_0_unsup_loss_numpy:  272.6237

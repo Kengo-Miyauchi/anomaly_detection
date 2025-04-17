@@ -1,0 +1,33 @@
+2025-04-16 14:27:26,318 - INFO - Starting TabNet pretraining...
+2025-04-16 15:18:57,968 - INFO - epoch   1 | loss:  478.1051,  val_0_unsup_loss_numpy:13063.6543
+2025-04-16 16:11:04,917 - INFO - epoch   2 | loss:  201.7351,  val_0_unsup_loss_numpy: 4897.6582
+2025-04-16 17:03:29,308 - INFO - epoch   3 | loss:   48.4278,  val_0_unsup_loss_numpy:  311.5956
+2025-04-16 17:56:17,329 - INFO - epoch   4 | loss:    2.9740,  val_0_unsup_loss_numpy:   13.3241
+2025-04-16 18:49:10,061 - INFO - epoch   5 | loss:    1.3984,  val_0_unsup_loss_numpy:    7.7557
+2025-04-16 19:42:01,795 - INFO - epoch   6 | loss:    0.8081,  val_0_unsup_loss_numpy:    5.6374
+2025-04-16 20:32:13,935 - INFO - epoch   7 | loss:    0.6181,  val_0_unsup_loss_numpy:   37.0890
+2025-04-16 21:19:01,569 - INFO - epoch   8 | loss:    0.5164,  val_0_unsup_loss_numpy:   38.9477
+2025-04-16 22:05:48,629 - INFO - epoch   9 | loss:    0.4223,  val_0_unsup_loss_numpy:    7.4100
+2025-04-16 22:52:27,643 - INFO - epoch  10 | loss:    0.3835,  val_0_unsup_loss_numpy:    8.4597
+2025-04-16 23:38:59,808 - INFO - epoch  11 | loss:    0.3434,  val_0_unsup_loss_numpy:    5.9235
+2025-04-17 00:25:28,749 - INFO - epoch  12 | loss:    0.3283,  val_0_unsup_loss_numpy:    3.4054
+2025-04-17 01:11:56,290 - INFO - epoch  13 | loss:    0.3159,  val_0_unsup_loss_numpy:    3.7372
+2025-04-17 01:58:24,200 - INFO - epoch  14 | loss:    0.3061,  val_0_unsup_loss_numpy:    1.9419
+2025-04-17 02:44:49,428 - INFO - epoch  15 | loss:    0.2855,  val_0_unsup_loss_numpy:    3.0605
+2025-04-17 03:31:15,715 - INFO - epoch  16 | loss:    0.2750,  val_0_unsup_loss_numpy:    2.2843
+2025-04-17 04:17:43,389 - INFO - epoch  17 | loss:    0.2659,  val_0_unsup_loss_numpy:    1.8480
+2025-04-17 05:04:13,127 - INFO - epoch  18 | loss:    0.2613,  val_0_unsup_loss_numpy:    4.5804
+2025-04-17 05:50:43,226 - INFO - epoch  19 | loss:    0.2575,  val_0_unsup_loss_numpy:    4.8601
+2025-04-17 06:37:13,943 - INFO - epoch  20 | loss:    0.2599,  val_0_unsup_loss_numpy:    2.1104
+2025-04-17 07:23:44,233 - INFO - epoch  21 | loss:    0.2562,  val_0_unsup_loss_numpy:    3.1811
+2025-04-17 08:10:12,465 - INFO - epoch  22 | loss:    0.2519,  val_0_unsup_loss_numpy:    2.5710
+2025-04-17 08:56:42,728 - INFO - epoch  23 | loss:    0.2512,  val_0_unsup_loss_numpy:    6.2763
+2025-04-17 09:43:54,266 - INFO - epoch  24 | loss:    0.2436,  val_0_unsup_loss_numpy:    2.3643
+2025-04-17 10:30:28,343 - INFO - epoch  25 | loss:    0.2399,  val_0_unsup_loss_numpy:    4.1397
+2025-04-17 11:17:02,020 - INFO - epoch  26 | loss:    0.2379,  val_0_unsup_loss_numpy:    1.7513
+2025-04-17 12:03:31,997 - INFO - epoch  27 | loss:    0.2332,  val_0_unsup_loss_numpy:    2.8204
+2025-04-17 12:50:04,476 - INFO - epoch  28 | loss:    0.2304,  val_0_unsup_loss_numpy:    4.2615
+2025-04-17 13:36:36,192 - INFO - epoch  29 | loss:    0.2290,  val_0_unsup_loss_numpy:    1.4643
+2025-04-17 14:23:09,036 - INFO - epoch  30 | loss:    0.2255,  val_0_unsup_loss_numpy:    8.9826
+2025-04-17 15:09:40,754 - INFO - epoch  31 | loss:    0.2223,  val_0_unsup_loss_numpy:    1.8763
+2025-04-17 15:56:14,265 - INFO - epoch  32 | loss:    0.2210,  val_0_unsup_loss_numpy:    4.2462

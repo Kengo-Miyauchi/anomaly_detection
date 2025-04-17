@@ -4,6 +4,7 @@ import yaml
 from util_module.callback import LogCallback
 import logging
 import os
+from matplotlib import pyplot as plt
 
 class ExecModel:
     def __init__(self, device, config, dataset_name, model_name, X_train, X_valid=None, refit=False,
@@ -35,7 +36,7 @@ class ExecModel:
         self.out_dir = self.set_out_dir()
         os.makedirs(self.out_dir, exist_ok=True)
         if(self.path_to_pretrained==None):
-            self.path_to_pretrained = './model/' + dataset_name + "/tabnet-pretrain-out2023-" + str(self.feature_dim) + "dim"
+            self.path_to_pretrained = f'./model/{dataset_name}/{model_name}-{str(self.feature_dim)}dim'
         os.makedirs(self.path_to_pretrained, exist_ok=True)
         
         if(os.path.exists(self.path_to_pretrained+"/pretrained.pth")):
@@ -66,9 +67,8 @@ class ExecModel:
             mask_type='entmax', # "sparsemax",
             n_d = self.feature_dim,
             n_a = self.feature_dim,
+            n_steps=self.n_steps,
             verbose=100,
-            use_self_attn = self.use_self_attn,
-            sequence_length = self.sequence_length
             #warm_start=self.refit,
         )
         return unsupervised_model
@@ -81,7 +81,9 @@ class ExecModel:
             max_epochs=self.max_epochs , patience=1000000,
             batch_size=self.batch_size_pre, virtual_batch_size=256,
             pretraining_ratio=self.pretraining_ratio,
-            callbacks=[LogCallback()]
+            callbacks=[LogCallback()],
+            use_self_attn = self.use_self_attn,
+            sequence_length = self.sequence_length,
         )
     
     # ログの設定
@@ -124,3 +126,24 @@ class ExecModel:
     def gather_conditions(self):
         conditions = [("feature_dim",self.feature_dim),("optimizer_params",self.optimizer_params),("pretraining_ratio",self.pretraining_ratio),("max_epochs",self.max_epochs)]
         return conditions
+    
+    def train_curve(self, start=1):
+        start = 1
+
+        # 学習履歴から再構成ロスと検証セットのロスを取得
+        train_loss = self.unsupervised_model.history['loss']
+        valid_loss = self.unsupervised_model.history['val_0_unsup_loss_numpy']
+        train_loss = train_loss[start-1:]
+        valid_loss = valid_loss[start-1:]
+
+        # グラフの作成
+        plt.figure(figsize=(10, 6))
+        plt.plot(range(start, start+len(train_loss)), train_loss, label="Train Loss")
+        plt.plot(range(start, start+len(valid_loss)), valid_loss, label="Validation Loss")
+        plt.title("Reconstruction Loss during Pretraining", fontsize=14)
+        plt.xlabel("Epoch", fontsize=12)
+        plt.ylabel("Loss", fontsize=12)
+        plt.legend()
+        img_path = self.path_to_pretrained+"/train_curve_"+str(start)+"-"+str(start+len(train_loss)-1)+".png"
+        plt.savefig(img_path)
+        print(f"Train curve: {img_path}")

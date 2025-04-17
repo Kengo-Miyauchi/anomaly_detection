@@ -11,7 +11,7 @@ from util_module import SCADA_utils
 #os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 #os.environ['CUDA_LAUNCH_BLOCKING'] = "1"
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+print(f"device: {device}")
 # download data
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"
@@ -50,9 +50,12 @@ for file_path in file_list:
         gc.collect()
 
 # set execute model
-model_name = "tabnet-pretrain-out2023"
+#model_name = "tabnet-pretrain-out2023"
+model_name = "tabnet-self-attn"
 config = set_config_file()
 exec_model = ExecModel(device,config,dataset_name,model_name,X_train,X_valid)
 out_dir = exec_model.out_dir
 
 print(f"finish model build: {exec_model.path_to_pretrained}")
+
+exec_model.train_curve()
