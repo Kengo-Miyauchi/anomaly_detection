@@ -1,5 +1,0 @@
-End Time : 2025-02-10 15:48:03
-feature_dim : 40
-optimizer_params : {'lr': 0.001}
-pretraining_ratio : 0.5
-max_epochs : 100
