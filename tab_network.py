@@ -956,6 +956,67 @@ class SelfAttention(torch.nn.Module):
         """
         attn_output, _ = self.attention(x, x, x)
         return self.norm(attn_output + x)
+
+# masker for sequence-wise masking
+class SequenceAwareObfuscator(torch.nn.Module):
+    """
+    obfuscater for sequnece data
+    各シーケンス内で、特徴量ごとにマスクする。
+    """
+    def __init__(self, pretraining_ratio, group_matrix):
+        super(SequenceAwareObfuscator, self).__init__()
+        self.pretraining_ratio = pretraining_ratio
+        self.group_matrix = (group_matrix > 0) + 0.
+        self.num_groups = group_matrix.shape[0]
+
+    def forward(self, x):
+        """
+        Parameters
+        ----------
+        x : Tensor
+            Shape = [batch_size * sequence_length, input_dim]
+            ※ DataLoader で sequence flatten されている前提
+
+        Returns
+        -------
+        masked_input : Tensor, same shape as x
+        obfuscated_groups : [batch_size, num_groups]
+        obfuscated_vars : [batch_size * sequence_length, input_dim]
+        """
+        bs_seq, input_dim = x.shape
+        assert bs_seq % self.num_groups == 0 or self.num_groups == 1, "Check group configuration"
+
+        # infer batch_size and sequence_length
+        # e.g. if we reshape from [B, L, D] → [B*L, D]
+        # We assume same L for all samples → bs = batch_size, L = sequence_length
+        # Let's get bs and L assuming known input_dim
+        # ⇒ safest is to pass `sequence_length` explicitly if needed
+
+        # For this case, we'll assume:
+        batch_size = None
+        sequence_length = None
+        for possible_bs in range(1, bs_seq + 1):
+            if bs_seq % possible_bs == 0:
+                seq_len = bs_seq // possible_bs
+                if seq_len * possible_bs == bs_seq:
+                    batch_size, sequence_length = possible_bs, seq_len
+                    break
+        assert batch_size is not None, "Cannot infer batch size and sequence length."
+
+        # Generate obfuscation mask per group per sample (not per frame)
+        obfuscated_groups = torch.bernoulli(
+            self.pretraining_ratio * torch.ones((batch_size, self.num_groups), device=x.device)
+        )  # [B, G]
+
+        # Expand to sequence
+        obfuscated_groups_seq = obfuscated_groups.unsqueeze(1).expand(-1, sequence_length, -1)  # [B, L, G]
+        obfuscated_groups_seq = obfuscated_groups_seq.reshape(batch_size * sequence_length, self.num_groups)  # [B*L, G]
+
+        obfuscated_vars = torch.matmul(obfuscated_groups_seq, self.group_matrix)  # [B*L, D]
+        masked_input = (1 - obfuscated_vars) * x
+
+        return masked_input, obfuscated_groups, obfuscated_vars
+
     
 # TabNet Pretraining with Self Attention for Time Series Analysis
 class TimeSeriesTabNetPretraining(torch.nn.Module):
@@ -1012,8 +1073,9 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
                                            group_attention_matrix)
         self.post_embed_dim = self.embedder.post_embed_dim
 
-        self.masker = RandomObfuscator(self.pretraining_ratio,
-                                       group_matrix=self.embedder.embedding_group_matrix)
+        self.masker = SequenceAwareObfuscator(pretraining_ratio, 
+                                              group_matrix=self.embedder.embedding_group_matrix)
+
         self.encoder = TabNetEncoder(
             input_dim=self.post_embed_dim,
             output_dim=self.post_embed_dim,
