@@ -46,8 +46,21 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
         batch = batch.to(exec_model.device)
         try:
             if exec_model.use_self_attn:
-                steps_out, _ = exec_model.unsupervised_model.network.encoder(batch)
-                steps_out, _ = exec_model.unsupervised_model.network.self_attn(steps_out, steps_out, steps_out)
+                batch_size, sequence_length, _ = batch.size()
+                steps_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
+                
+                steps_outputs = torch.stack(steps_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
+                steps_outputs = steps_outputs.view(batch_size, sequence_length, exec_model.unsupervised_model.n_steps, -1)
+                steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
+
+                # attention over time axis (dim=2)
+                steps_outputs = steps_outputs.reshape(batch_size * exec_model.unsupervised_model.n_steps, sequence_length, -1)
+                steps_outputs, _ = exec_model.unsupervised_model.network.self_attn(steps_outputs, steps_outputs, steps_outputs)
+                steps_outputs = steps_outputs.view(batch_size, exec_model.unsupervised_model.n_steps, sequence_length, -1)
+
+                steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
+                steps_outputs = steps_outputs.reshape(batch_size * sequence_length, exec_model.unsupervised_model.n_steps, -1)
+                steps_outputs = torch.unbind(steps_outputs, dim=1)
             else:
                 step_outputs = exec_model.unsupervised_model.network.encoder(batch)[0]
         except Exception as e:

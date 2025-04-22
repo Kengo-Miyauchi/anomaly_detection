@@ -30,3 +30,5 @@
 2025-04-22 15:25:13,448 - INFO - epoch  29 | loss:    0.3326,  val_0_unsup_loss_numpy:    6.1979
 2025-04-22 16:11:24,958 - INFO - epoch  30 | loss:    0.3334,  val_0_unsup_loss_numpy:    5.0145
 2025-04-22 16:57:38,354 - INFO - epoch  31 | loss:    0.3291,  val_0_unsup_loss_numpy:    4.2089
+2025-04-22 17:43:54,535 - INFO - epoch  32 | loss:    0.3217,  val_0_unsup_loss_numpy:    3.5196
+2025-04-22 18:30:13,739 - INFO - epoch  33 | loss:    0.3279,  val_0_unsup_loss_numpy:    2.4990
