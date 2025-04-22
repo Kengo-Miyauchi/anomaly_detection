@@ -4,6 +4,7 @@ import numpy as np
 import os
 import gc
 import pickle
+from sklearn.mixture import GaussianMixture
 from util_module.data_to_plot import plot_by_date,calc_scores
 from util_module.end_info import show_info
 from util_module.tabnet.tabnet_feature import data_to_TabNetFeatures
@@ -18,7 +19,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '10M'
+frequency = '1S'
 threshold_line = 100 - 0.01
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"
@@ -54,8 +55,17 @@ X_test = X_test.astype(np.float16)
 
 # set execute model
 model_name = "tabnet-self-attn"
+#path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
+path_to_pretrained = "model/haenkaze/tabnet-self-attn-40dim"
 config = set_config_file()
-exec_model = ExecModel(device,config,dataset_name,model_name,X_train,path_to_pretrained="model/haenkaze/tabnet-self-attn-40dim")
+exec_model = ExecModel(
+    device=device,
+    config=config,
+    dataset_name=dataset_name,
+    model_name=model_name,
+    X_train=X_train,
+    path_to_pretrained=path_to_pretrained
+)
 out_dir = exec_model.out_dir
 
 # convert data to tabnet encoder features
@@ -72,11 +82,12 @@ score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
 #os.makedirs(score_file, exist_ok=True)
 n_components = 10
 
-from sklearn.mixture import GaussianMixture
+# GMM training
+isTrain = True
 path_to_gmm = f"model/haenkaze/{model_name}"
 os.makedirs(path_to_gmm, exist_ok=True)
 gmm_model = f"{path_to_gmm}/gmm_{frequency}.pkl"
-if os.path.exists(gmm_model):
+if os.path.exists(gmm_model) and not isTrain:
     print(f"Load from {gmm_model}")
     with open(gmm_model, "rb") as file:
         gmm = pickle.load(file)

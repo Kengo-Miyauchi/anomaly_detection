@@ -37,8 +37,18 @@ def create_dataloader(X,batch_size,need_shuffle):
     )
     return dataloader
 
+def create_shifted_dataloader(X,sequence_length,batch_size,need_shuffle):
+    dataloader = DataLoader(
+        ShiftedTimeSeriesDataset(X.astype(np.float32), sequence_length),
+        batch_size=batch_size,
+        shuffle=need_shuffle,
+        pin_memory=True,
+        num_workers=4
+    )
+    return dataloader
+
 def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
-    dataloader = create_dataloader(data,exec_model.batch_size_tr,need_shuffle)
+    dataloader = create_dataloader(data,exec_model.batch_size_tr,need_shuffle) if not exec_model.use_self_attn else create_shifted_dataloader(data,exec_model.sequence_length,exec_model.batch_size_tr,need_shuffle)
     # data to features as encoder output data
     features = []
     for batch_index, batch in enumerate(dataloader):
@@ -46,23 +56,26 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
         batch = batch.to(exec_model.device)
         try:
             if exec_model.use_self_attn:
-                batch_size, sequence_length, _ = batch.size()
+                batch_size, _ = batch.size()
+                sequence_length = exec_model.unsupervised_model.sequence_length
+                n_steps = exec_model.unsupervised_model.n_steps
                 steps_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
                 
                 steps_outputs = torch.stack(steps_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
-                steps_outputs = steps_outputs.view(batch_size, sequence_length, exec_model.unsupervised_model.n_steps, -1)
+                steps_outputs = steps_outputs.view(batch_size, sequence_length, n_steps, -1)
                 steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
                 # attention over time axis (dim=2)
-                steps_outputs = steps_outputs.reshape(batch_size * exec_model.unsupervised_model.n_steps, sequence_length, -1)
+                steps_outputs = steps_outputs.reshape(batch_size * n_steps, sequence_length, -1)
                 steps_outputs, _ = exec_model.unsupervised_model.network.self_attn(steps_outputs, steps_outputs, steps_outputs)
-                steps_outputs = steps_outputs.view(batch_size, exec_model.unsupervised_model.n_steps, sequence_length, -1)
+                steps_outputs = steps_outputs.view(batch_size, n_steps, sequence_length, -1)
 
                 steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
-                steps_outputs = steps_outputs.reshape(batch_size * sequence_length, exec_model.unsupervised_model.n_steps, -1)
+                steps_outputs = steps_outputs.reshape(batch_size * sequence_length, n_steps, -1)
                 steps_outputs = torch.unbind(steps_outputs, dim=1)
             else:
-                step_outputs = exec_model.unsupervised_model.network.encoder(batch)[0]
+                batch = exec_model.unsupervised_model.network.embedder(batch)
+                step_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
         except Exception as e:
             print("\n"+f"Error occurred in batch {batch_index}: {e}")
             print(f"Batch shape: {batch.shape}")
