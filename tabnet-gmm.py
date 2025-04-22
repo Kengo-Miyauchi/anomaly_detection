@@ -54,9 +54,9 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = "tabnet-self-attn"
+model_name = "tabnet-self-attn2"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/tabnet-self-attn-40dim"
+path_to_pretrained = "model/haenkaze/tabnet-self-attn2-40dim"
 config = set_config_file()
 exec_model = ExecModel(
     device=device,
@@ -67,6 +67,8 @@ exec_model = ExecModel(
     path_to_pretrained=path_to_pretrained
 )
 out_dir = exec_model.out_dir
+if exec_model.use_self_attn:
+    timestamp = SCADA_utils.median_timestamps(timestamp, exec_model.sequence_length)
 
 # convert data to tabnet encoder features
 print("Start feature extraction")
@@ -128,16 +130,3 @@ calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_fi
 print(f"result: {img_path}")
 show_info(out_dir,exec_model)
 print(f"Score result: {score_file}")
-
-""" event_file = "data/haenkaze/events.csv"
-if exec_model.gmm_multi:
-    for n in range(20):
-        anomaly_score, threshold, img_path = calc_AnomalyScore(n+1,exec_model.covariance_type,feature_train,feature_test,out_dir)
-        plot_by_date(exec_model.log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_file)
-        print(f"result: {img_path}")
-else:
-    n_components=3
-    anomaly_score, threshold, img_path = calc_AnomalyScore(n_components,exec_model.covariance_type,feature_train,feature_test,out_dir)
-    plot_by_date(exec_model.log_plot,anomaly_score,timestamp,train_range,threshold,img_path)
-    print(f"result: {img_path}")
-show_info(out_dir,exec_model) """

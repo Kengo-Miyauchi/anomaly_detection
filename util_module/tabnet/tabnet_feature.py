@@ -55,7 +55,7 @@ def create_dataloader(X,batch_size,need_shuffle):
 
 def create_shifted_dataloader(X,sequence_length,batch_size,need_shuffle):
     dataloader = DataLoader(
-        ShiftedTimeSeriesDataset(X.astype(np.float32), sequence_length),
+        TimeSeriesDataset(X.astype(np.float32), sequence_length),
         batch_size=batch_size,
         shuffle=need_shuffle,
         pin_memory=True,
@@ -72,10 +72,13 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
         batch = batch.to(exec_model.device)
         try:
             if exec_model.use_self_attn:
-                batch_size, _ = batch.size()
-                sequence_length = exec_model.unsupervised_model.sequence_length
+                batch_size, sequence_length, feature_dim = batch.size()
+                #sequence_length = exec_model.unsupervised_model.sequence_length
                 n_steps = exec_model.unsupervised_model.n_steps
-                steps_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
+                batch = batch.view(-1, feature_dim)  # [batch_size * sequence_length, input_dim]
+                embedded_x = exec_model.unsupervised_model.network.embedder(batch)  # [batch_size * sequence_length, embed_dim]
+                
+                steps_outputs, _ = exec_model.unsupervised_model.network.encoder(embedded_x)
                 
                 steps_outputs = torch.stack(steps_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
                 steps_outputs = steps_outputs.view(batch_size, sequence_length, n_steps, -1)
@@ -126,11 +129,4 @@ def data_to_framedFeatures(exec_model,data,num_frames,need_shuffle=False):
         while((len(encoder_out)-i)>=num_frames):
             tmp = []
             for j in range(num_frames):
-                tmp.extend(encoder_out[j])
-            i+=1
-            framed_features.append(tmp)
-            del tmp
-        del encoder_out
-        torch.cuda.empty_cache()
-        #if (batch_index%100==0):print(f"{batch_index}/{len(dataloader)} batch:")
-    return framed_features
+                tmp.extend(en
