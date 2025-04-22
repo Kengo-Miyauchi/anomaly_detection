@@ -78,20 +78,20 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
                 batch = batch.view(-1, feature_dim)  # [batch_size * sequence_length, input_dim]
                 embedded_x = exec_model.unsupervised_model.network.embedder(batch)  # [batch_size * sequence_length, embed_dim]
                 
-                steps_outputs, _ = exec_model.unsupervised_model.network.encoder(embedded_x)
+                step_outputs, _ = exec_model.unsupervised_model.network.encoder(embedded_x)
                 
-                steps_outputs = torch.stack(steps_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
-                steps_outputs = steps_outputs.view(batch_size, sequence_length, n_steps, -1)
-                steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
+                step_outputs = torch.stack(step_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
+                step_outputs = step_outputs.view(batch_size, sequence_length, n_steps, -1)
+                step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
                 # attention over time axis (dim=2)
-                steps_outputs = steps_outputs.reshape(batch_size * n_steps, sequence_length, -1)
-                steps_outputs, _ = exec_model.unsupervised_model.network.self_attn(steps_outputs, steps_outputs, steps_outputs)
-                steps_outputs = steps_outputs.view(batch_size, n_steps, sequence_length, -1)
+                step_outputs = step_outputs.reshape(batch_size * n_steps, sequence_length, -1)
+                step_outputs, _ = exec_model.unsupervised_model.network.self_attn(step_outputs, step_outputs, step_outputs)
+                step_outputs = step_outputs.view(batch_size, n_steps, sequence_length, -1)
 
-                steps_outputs = steps_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
-                steps_outputs = steps_outputs.reshape(batch_size * sequence_length, n_steps, -1)
-                steps_outputs = torch.unbind(steps_outputs, dim=1)
+                step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
+                step_outputs = step_outputs.reshape(batch_size * sequence_length, n_steps, -1)
+                step_outputs = torch.unbind(step_outputs, dim=1)
             else:
                 batch = exec_model.unsupervised_model.network.embedder(batch)
                 step_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
@@ -129,4 +129,11 @@ def data_to_framedFeatures(exec_model,data,num_frames,need_shuffle=False):
         while((len(encoder_out)-i)>=num_frames):
             tmp = []
             for j in range(num_frames):
-                tmp.extend(en
+                tmp.extend(encoder_out[j])
+            i+=1
+            framed_features.append(tmp)
+            del tmp
+        del encoder_out
+        torch.cuda.empty_cache()
+        #if (batch_index%100==0):print(f"{batch_index}/{len(dataloader)} batch:")
+    return framed_features
