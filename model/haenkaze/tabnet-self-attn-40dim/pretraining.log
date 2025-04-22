@@ -31,3 +31,12 @@
 2025-04-17 14:23:09,036 - INFO - epoch  30 | loss:    0.2255,  val_0_unsup_loss_numpy:    8.9826
 2025-04-17 15:09:40,754 - INFO - epoch  31 | loss:    0.2223,  val_0_unsup_loss_numpy:    1.8763
 2025-04-17 15:56:14,265 - INFO - epoch  32 | loss:    0.2210,  val_0_unsup_loss_numpy:    4.2462
+2025-04-17 16:43:06,861 - INFO - epoch  33 | loss:    0.2184,  val_0_unsup_loss_numpy:   23.2554
+2025-04-17 17:29:43,092 - INFO - epoch  34 | loss:    0.2250,  val_0_unsup_loss_numpy:    3.1793
+2025-04-17 18:16:17,829 - INFO - epoch  35 | loss:    0.2143,  val_0_unsup_loss_numpy:    8.3144
+2025-04-17 19:02:51,291 - INFO - epoch  36 | loss:    0.2120,  val_0_unsup_loss_numpy:    3.0015
+2025-04-17 19:49:24,594 - INFO - epoch  37 | loss:    0.2110,  val_0_unsup_loss_numpy:    1.1762
+2025-04-17 20:35:57,037 - INFO - epoch  38 | loss:    0.2097,  val_0_unsup_loss_numpy:    1.3713
+2025-04-17 21:22:29,359 - INFO - epoch  39 | loss:    0.2094,  val_0_unsup_loss_numpy:    0.8997
+2025-04-17 22:08:59,613 - INFO - epoch  40 | loss:    0.2069,  val_0_unsup_loss_numpy:    1.6953
+2025-04-17 22:08:59,634 - INFO - TabNet pretraining finished.

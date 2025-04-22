@@ -53,9 +53,9 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = "tabnet-gmm"
+model_name = "tabnet-self-attn"
 config = set_config_file()
-exec_model = ExecModel(device,config,dataset_name,model_name,X_train,path_to_pretrained="model/haenkaze/tabnet-pretrain-out2023-40dim")
+exec_model = ExecModel(device,config,dataset_name,model_name,X_train,path_to_pretrained="model/haenkaze/tabnet-self-attn-40dim")
 out_dir = exec_model.out_dir
 
 # convert data to tabnet encoder features
@@ -66,8 +66,8 @@ del X_train
 del X_test
 print("Finish feature extraction")
 
-event_files = ["data/haenkaze/events.csv"]
-event_files.append("data/haenkaze/event_range.csv")
+event_files = [f"{data_path}/data/haenkaze/events.csv"]
+event_files.append(f"{data_path}/data/haenkaze/event_range.csv")
 score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
 #os.makedirs(score_file, exist_ok=True)
 n_components = 10

@@ -10,6 +10,22 @@ class TorchDataset(Dataset):
     def __getitem__(self, index):
         x = self.x[index]
         return x
+    
+class ShiftedTimeSeriesDataset(Dataset):
+    def __init__(self, x, sequence_length):
+        """
+        data: Tensor of shape [num_samples, input_dim]
+        sequence_length: Number of timesteps per sample
+        """
+        self.x = x
+        self.sequence_length = sequence_length
+
+    def __len__(self):
+        return len(self.x) - self.sequence_length + 1
+
+    def __getitem__(self, idx):
+        # 1ステップずつスライドして取得
+        return self.x[idx:idx+self.sequence_length]
 
 def create_dataloader(X,batch_size,need_shuffle):
     dataloader = DataLoader(
@@ -29,7 +45,11 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
         # import pdb; pdb.set_trace()
         batch = batch.to(exec_model.device)
         try:
-            step_outputs = exec_model.unsupervised_model.network.encoder(batch)[0]
+            if exec_model.use_self_attn:
+                steps_out, _ = exec_model.unsupervised_model.network.encoder(batch)
+                steps_out, _ = exec_model.unsupervised_model.network.self_attn(steps_out, steps_out, steps_out)
+            else:
+                step_outputs = exec_model.unsupervised_model.network.encoder(batch)[0]
         except Exception as e:
             print("\n"+f"Error occurred in batch {batch_index}: {e}")
             print(f"Batch shape: {batch.shape}")
