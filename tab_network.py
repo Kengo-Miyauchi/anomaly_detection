@@ -945,7 +945,7 @@ class RandomObfuscator(torch.nn.Module):
 
 # Self Attention Layer
 class SelfAttention(torch.nn.Module):
-    def __init__(self, embed_dim, num_heads=4, dropout=0.1):
+    def __init__(self, embed_dim, num_heads=4, dropout=0.1, batch_first=True):
         super(SelfAttention, self).__init__()
         self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
         self.norm = torch.nn.LayerNorm(embed_dim)
@@ -954,20 +954,20 @@ class SelfAttention(torch.nn.Module):
         """
         x: (sequence_length, batch_size, embed_dim)
         """
-        steps_out = torch.stack(steps_out, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
-        steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
-        steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
+        batch_size, sequence_length, n_steps, _ = x.shape
+        x = torch.stack(x, dim=1)
+        x = x.view(batch_size, sequence_length, n_steps, -1)
+        x = x.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
         # attention over time axis (dim=2)
-        steps_out = steps_out.reshape(batch_size * self.n_steps, sequence_length, -1)
-        steps_out, _ = self.self_attn(steps_out, steps_out, steps_out)
-        steps_out = steps_out.view(batch_size, self.n_steps, sequence_length, -1)
-
-        steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
-        steps_out = steps_out.reshape(batch_size * sequence_length, self.n_steps, -1)
-        steps_out = torch.unbind(steps_out, dim=1)  # list of [batch_size*sequence_length, feat_dim]
+        x = x.reshape(batch_size * n_steps, sequence_length, -1)
         attn_output, _ = self.attention(x, x, x)
-        return self.norm(attn_output + x)
+        attn_output = attn_output.view(batch_size, n_steps, sequence_length, -1)
+        attn_output += x  # residual connection
+        attn_output = attn_output.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
+        attn_output = attn_output.reshape(batch_size * sequence_length, n_steps, -1)
+        attn_output = torch.unbind(attn_output, dim=1)  # list of [batch_size*sequence_length, feat_dim]
+        return self.norm(attn_output)
 
 # masker for sequence-wise masking
 class SequenceAwareObfuscator(torch.nn.Module):
@@ -1093,7 +1093,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = torch.nn.MultiheadAttention(embed_dim=n_d, num_heads=4, batch_first=True)
+        self.self_attn = SelfAttention(embed_dim=n_d, num_heads=4, batch_first=True)
         print("Using Self Attention")
 
 
