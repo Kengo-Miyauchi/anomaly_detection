@@ -54,9 +54,9 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = "tabnet-self-attn2"
+model_name = "tabnet-self-attn"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/tabnet-self-attn2-40dim"
+path_to_pretrained = "model/haenkaze/tabnet-self-attn-40dim"
 config = set_config_file()
 exec_model = ExecModel(
     device=device,
@@ -67,13 +67,15 @@ exec_model = ExecModel(
     path_to_pretrained=path_to_pretrained
 )
 out_dir = exec_model.out_dir
-if exec_model.use_self_attn:
-    timestamp = SCADA_utils.median_timestamps(timestamp, exec_model.sequence_length)
+""" if exec_model.use_self_attn:
+    timestamp = SCADA_utils.median_timestamps(timestamp, exec_model.sequence_length) """
 
 # convert data to tabnet encoder features
 print("Start feature extraction")
 feature_train = data_to_TabNetFeatures(exec_model,X_train)
+feature_train = feature_train[:len(X_train)]
 feature_test = data_to_TabNetFeatures(exec_model,X_test)
+feature_test = feature_test[:len(X_test)]
 del X_train
 del X_test
 print("Finish feature extraction")
@@ -85,7 +87,7 @@ score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
 n_components = 10
 
 # GMM training
-isTrain = True
+isTrain = False
 path_to_gmm = f"model/haenkaze/{model_name}"
 os.makedirs(path_to_gmm, exist_ok=True)
 gmm_model = f"{path_to_gmm}/gmm_{frequency}.pkl"
@@ -107,6 +109,7 @@ threshold = np.percentile(log_likelihood,threshold_line)
 #threshold = max(log_likelihood)
 del feature_train
 anomaly_score = -gmm.score_samples(feature_test)
+#import pdb; pdb.set_trace()
 df = pd.DataFrame({"DATETIME": timestamp, "AnomalyScore": anomaly_score})
 if(not(pd.api.types.is_datetime64_any_dtype(df['DATETIME']))):
     df['DATETIME'] = pd.to_datetime(df['DATETIME'],format='%d/%m/%y %H')
