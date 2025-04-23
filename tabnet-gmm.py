@@ -54,9 +54,9 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = "tabnet-self-attn"
+model_name = "tabnet-self-attn2"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/tabnet-self-attn-40dim"
+path_to_pretrained = "model/haenkaze/tabnet-self-attn2-40dim"
 config = set_config_file()
 exec_model = ExecModel(
     device=device,
