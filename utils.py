@@ -117,6 +117,23 @@ class ShiftedTimeSeriesDataset(Dataset):
         return self.x[idx:idx+self.sequence_length]
 
 
+class TimeSeriesDataset(Dataset):
+    def __init__(self, data, sequence_length):
+        """
+        data: [total_time_steps, input_dim]
+        """
+        self.data = torch.tensor(data, dtype=torch.float32)
+        self.sequence_length = sequence_length
+
+    def __len__(self):
+        return len(self.data) - self.sequence_length + 1
+
+    def __getitem__(self, idx):
+        # shape: [sequence_length, input_dim]
+        seq = self.data[idx:idx + self.sequence_length]
+        return seq
+
+
 def create_sampler(weights, y_train):
     """
     This creates a sampler from the given weights

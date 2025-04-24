@@ -945,19 +945,16 @@ class RandomObfuscator(torch.nn.Module):
 
 # Self Attention Layer
 class SelfAttention(torch.nn.Module):
-    def __init__(self, embed_dim, num_heads=4, dropout=0.1, batch_first=True):
+    def __init__(self, embed_dim, num_heads=4, dropout=0.1):
         super(SelfAttention, self).__init__()
         self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
         self.norm = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x):
         """
-        x: (sequence_length, batch_size, embed_dim)
+        x: (batch_size, n_steps, seq_len, feat_dim)
         """
-        batch_size, sequence_length, n_steps, _ = x.shape
-        x = torch.stack(x, dim=1)
-        x = x.view(batch_size, sequence_length, n_steps, -1)
-        x = x.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
+        batch_size, n_steps, sequence_length, _ = x.shape
 
         # attention over time axis (dim=2)
         x = x.reshape(batch_size * n_steps, sequence_length, -1)
@@ -1093,7 +1090,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = SelfAttention(embed_dim=n_d, num_heads=4, batch_first=True)
+        self.self_attn = SelfAttention(embed_dim=n_d, num_heads=4,)
         print("Using Self Attention")
 
 
@@ -1129,8 +1126,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
             # attention over time axis (dim=2)
-            steps_out = steps_out.reshape(batch_size * self.n_steps, sequence_length, -1)
-            steps_out, _ = self.self_attn(steps_out, steps_out, steps_out)
+            steps_out, _ = self.self_attn(steps_out)
             steps_out = steps_out.view(batch_size, self.n_steps, sequence_length, -1)
 
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
