@@ -122,7 +122,7 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
                 
                 step_outputs, _ = exec_model.unsupervised_model.network.encoder(embedded_x)
                 
-                step_outputs = torch.stack(step_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
+                """ step_outputs = torch.stack(step_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
                 step_outputs = step_outputs.view(batch_size, sequence_length, n_steps, -1)
                 step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
@@ -133,7 +133,7 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
 
                 step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
                 step_outputs = step_outputs.reshape(batch_size * sequence_length, n_steps, -1)
-                step_outputs = torch.unbind(step_outputs, dim=1)
+                step_outputs = torch.unbind(step_outputs, dim=1) """
             else:
                 batch = exec_model.unsupervised_model.network.embedder(batch)
                 step_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)

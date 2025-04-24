@@ -5,9 +5,9 @@ import os
 import gc
 from matplotlib import pyplot as plt
 
-path_to_pretrained = 'model/haenkaze/tabnet-pretrain-40dim2'
+path_to_pretrained = 'model/haenkaze/tabnet-self-attn-40dim'
 unsupervised_model=torch.load(path_to_pretrained+'/pretrained.pth')
-start = 1
+start = 5
 
 # 学習履歴から再構成ロスと検証セットのロスを取得
 train_loss = unsupervised_model.history['loss']

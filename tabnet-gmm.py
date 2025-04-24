@@ -19,7 +19,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '1S'
+frequency = '10M'
 threshold_line = 100 - 0.01
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"

@@ -37,6 +37,8 @@ class ExecModel:
         os.makedirs(self.out_dir, exist_ok=True)
         if(self.path_to_pretrained==None):
             self.path_to_pretrained = f'./model/{dataset_name}/{model_name}-{str(self.feature_dim)}dim'
+            if self.use_self_attn:
+                self.path_to_pretrained += f"-{self.sequence_length}seq"
         os.makedirs(self.path_to_pretrained, exist_ok=True)
         
         if(os.path.exists(self.path_to_pretrained+"/pretrained.pth")):
@@ -79,7 +81,7 @@ class ExecModel:
             X_train=self.X_train,
             eval_set=[self.X_valid],
             max_epochs=self.max_epochs , patience=1000000,
-            batch_size=self.batch_size_pre, virtual_batch_size=256,
+            batch_size=self.batch_size_pre, virtual_batch_size=128,
             pretraining_ratio=self.pretraining_ratio,
             callbacks=[LogCallback()],
             use_self_attn = self.use_self_attn,
