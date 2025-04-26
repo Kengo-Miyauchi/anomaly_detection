@@ -4,6 +4,7 @@ from pytorch_tabnet.utils import (
     SparsePredictDataset,
     PredictDataset,
     ShiftedTimeSeriesDataset,
+    TimeSeriesDatasetBySequence,
     check_input
 )
 import scipy
@@ -113,7 +114,7 @@ def create_series_dataloaders(
         )
     else:
         train_dataloader = DataLoader(
-            ShiftedTimeSeriesDataset(X_train,sequence_length),
+            TimeSeriesDatasetBySequence(X_train,sequence_length),
             batch_size=batch_size,
             sampler=sampler,
             shuffle=need_shuffle,

@@ -947,7 +947,7 @@ class RandomObfuscator(torch.nn.Module):
 class SelfAttention(torch.nn.Module):
     def __init__(self, embed_dim, num_heads=4, dropout=0.1):
         super(SelfAttention, self).__init__()
-        self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout)
+        self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
         self.norm = torch.nn.LayerNorm(embed_dim)
 
     def forward(self, x):
@@ -959,12 +959,13 @@ class SelfAttention(torch.nn.Module):
         # attention over time axis (dim=2)
         x = x.reshape(batch_size * n_steps, sequence_length, -1)
         attn_output, _ = self.attention(x, x, x)
+        attn_output = self.norm(attn_output+x)  # residual connection and normalization
         attn_output = attn_output.view(batch_size, n_steps, sequence_length, -1)
-        attn_output += x  # residual connection
         attn_output = attn_output.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
         attn_output = attn_output.reshape(batch_size * sequence_length, n_steps, -1)
         attn_output = torch.unbind(attn_output, dim=1)  # list of [batch_size*sequence_length, feat_dim]
-        return self.norm(attn_output)
+        return attn_output
+    
 
 # masker for sequence-wise masking
 class SequenceAwareObfuscator(torch.nn.Module):
@@ -1126,12 +1127,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
             # attention over time axis (dim=2)
-            steps_out, _ = self.self_attn(steps_out)
-            steps_out = steps_out.view(batch_size, self.n_steps, sequence_length, -1)
-
-            steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
-            steps_out = steps_out.reshape(batch_size * sequence_length, self.n_steps, -1)
-            steps_out = torch.unbind(steps_out, dim=1)  # list of [batch_size*sequence_length, feat_dim]
+            steps_out = self.self_attn(steps_out)
 
             # (5) Decoder
             res = self.decoder(steps_out)

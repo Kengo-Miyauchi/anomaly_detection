@@ -117,22 +117,29 @@ class ShiftedTimeSeriesDataset(Dataset):
         return self.x[idx:idx+self.sequence_length]
 
 
-class TimeSeriesDataset(Dataset):
+class TimeSeriesDatasetBySequence(Dataset):
     def __init__(self, data, sequence_length):
         """
         data: [total_time_steps, input_dim]
+        sequence_length: int
         """
         self.data = torch.tensor(data, dtype=torch.float32)
         self.sequence_length = sequence_length
 
+        # シーケンス長で割り切れる最大の範囲に制限
+        total_length = (len(self.data) // sequence_length) * sequence_length
+        self.data = self.data[:total_length]  # 余りをカット
+
+        self.num_sequences = total_length // sequence_length
+
     def __len__(self):
-        return len(self.data) - self.sequence_length + 1
+        return self.num_sequences
 
     def __getitem__(self, idx):
-        # shape: [sequence_length, input_dim]
-        seq = self.data[idx:idx + self.sequence_length]
+        start_idx = idx * self.sequence_length
+        end_idx = start_idx + self.sequence_length
+        seq = self.data[start_idx:end_idx]  # shape: [sequence_length, input_dim]
         return seq
-
 
 def create_sampler(weights, y_train):
     """
