@@ -1141,12 +1141,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = torch.stack(steps_out, dim=1)
             steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
             steps_out = steps_out.permute(0, 2, 1, 3)
-            steps_out = steps_out.reshape(batch_size * self.n_steps, sequence_length, -1)
-            steps_out, _ = self.self_attn(steps_out, steps_out, steps_out)
-            steps_out = steps_out.view(batch_size, self.n_steps, sequence_length, -1)
-            steps_out = steps_out.permute(0, 2, 1, 3)
-            steps_out = steps_out.reshape(batch_size * sequence_length, self.n_steps, -1)
-            steps_out = torch.unbind(steps_out, dim=1)
+            steps_out = self.self_attn(steps_out)
 
             res = self.decoder(steps_out)
             return res, embedded_x, torch.ones(embedded_x.shape).to(x.device)
