@@ -8,4 +8,4 @@ covariance_type: full
 pretraining_ratio: 0.5
 max_epochs: 40
 use_self_attn: True
-sequence_length: 3
+sequence_length: 30

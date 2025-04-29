@@ -6,7 +6,7 @@ import gc
 from util_module.create_dataloader import create_dataloader
 from util_module.data_to_plot import plot_by_date
 from util_module.end_info import show_info
-from util_module.tabnet.tabnet_feature import data_to_TabNetFeatures
+from util_module.tabnet.extract_features import data_to_TabNetFeatures
 from util_module.tabnet.build_exec_model import ExecModel
 from util_module.tabnet.set_config import set_config_file
 from util_module import SCADA_utils

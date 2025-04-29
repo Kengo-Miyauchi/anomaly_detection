@@ -179,3 +179,23 @@ def data_to_framedFeatures(exec_model,data,num_frames,need_shuffle=False):
         torch.cuda.empty_cache()
         #if (batch_index%100==0):print(f"{batch_index}/{len(dataloader)} batch:")
     return framed_features
+
+def data_to_AEfeatures(model,device,data,batch_size=256,need_shuffle=False):
+    dataloader = create_dataloader(data,batch_size,need_shuffle)
+    # data to features as encoder output data
+    features = []
+    for batch_index, batch in enumerate(dataloader):
+        #import pdb; pdb.set_trace()
+        batch = batch.to(device)
+        try:
+            encoder_out = model.encoder(batch)
+        except Exception as e:
+            print("\n"+f"Error occurred in batch {batch_index}: {e}")
+            print(f"Batch shape: {batch.shape}")
+            raise e
+        encoder_out = encoder_out.detach().cpu()
+        features.append(encoder_out)
+        del encoder_out, batch
+    features = torch.cat(features)
+    features = features.detach().cpu()
+    return features

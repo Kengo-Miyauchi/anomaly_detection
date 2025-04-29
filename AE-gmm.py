@@ -4,12 +4,10 @@ import numpy as np
 import os
 import gc
 import pickle
+from util_module.autoencoder import AutoEncoder
 from sklearn.mixture import GaussianMixture
 from util_module.data_to_plot import plot_by_date,calc_scores
-from util_module.end_info import show_info
-from util_module.tabnet.extract_features import data_to_TabNetFeatures
-from util_module.tabnet.build_exec_model import ExecModel
-from util_module.tabnet.set_config import set_config_file
+from util_module.tabnet.extract_features import data_to_AEfeatures
 from util_module import SCADA_utils
 
 # set device
@@ -19,8 +17,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '10M'
-threshold_line = 100 - 0.01
+frequency = '1S'
+threshold_line = 100 - 0.0005
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"
 if(frequency=='1S' or 'sampled' in frequency):
@@ -53,28 +51,22 @@ X_train = X_train.astype(np.float16)
 X_test = X_test.astype(np.float16)
 
 
-# set execute model
-model_name = "tabnet-self-attn2"
+# set AutoEncoder model
+model_name = "AE-gmm"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/tabnet-self-attn2-40dim"
-config = set_config_file()
-exec_model = ExecModel(
-    device=device,
-    config=config,
-    dataset_name=dataset_name,
-    model_name=model_name,
-    X_train=X_train,
-    path_to_pretrained=path_to_pretrained
-)
-out_dir = exec_model.out_dir
-""" if exec_model.use_self_attn:
-    timestamp = SCADA_utils.median_timestamps(timestamp, exec_model.sequence_length) """
+path_to_pretrained = "model/haenkaze/autoencoder/autoencoder_40dim.pth"
+print(f"Load model from {path_to_pretrained}")
+model = AutoEncoder(input_dim=X_train.shape[1], hidden_dim=40).to(device)
+model.load_state_dict(torch.load(path_to_pretrained))
+model.eval()
+out_dir = "result/" + dataset_name + "/" + model_name + "/" + str(40) + "dim"
+os.makedirs(out_dir, exist_ok=True)
 
 # convert data to tabnet encoder features
 print("Start feature extraction")
-feature_train = data_to_TabNetFeatures(exec_model,X_train)
+feature_train = data_to_AEfeatures(model,device,X_train)
 feature_train = feature_train[:len(X_train)]
-feature_test = data_to_TabNetFeatures(exec_model,X_test)
+feature_test = data_to_AEfeatures(model,device,X_test)
 feature_test = feature_test[:len(X_test)]
 del X_train
 del X_test
@@ -97,7 +89,7 @@ if os.path.exists(gmm_model) and not isTrain:
         gmm = pickle.load(file)
 else:
     print("GMM Training")
-    gmm = GaussianMixture(n_components=n_components, covariance_type=exec_model.covariance_type, random_state=42, n_init=10, max_iter=25)
+    gmm = GaussianMixture(n_components=n_components, covariance_type='full', random_state=42, n_init=10, max_iter=25)
     gmm.fit(feature_train)
     print("Finish GMM Training")
     with open(gmm_model, "wb") as file:
@@ -123,13 +115,12 @@ df = df.drop(remove_indices)
 
 #import pdb; pdb.set_trace()
 
-#img_path = out_dir + "/"+frequency+"_gmm_" + str(n_components) + "components.png"
+#img_path = out_dir + "/"+frequency+"_gmm_" + str(n_components) + "compsonents.png"
 log_plot = False
 if log_plot:img_path = f"{out_dir}/{frequency}_log.png"
 else:img_path = f"{out_dir}/{frequency}.png"
 plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files)
 print(f"Threshold line: {threshold_line}%")
 calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7)
-print(f"result: {img_path}")
-show_info(out_dir,exec_model)
+print(f"image result: {img_path}")
 print(f"Score result: {score_file}")
