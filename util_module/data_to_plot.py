@@ -3,7 +3,9 @@ import pandas as pd
 from datetime import datetime
 import csv
 from datetime import datetime, timedelta
-from sklearn.metrics import precision_score, recall_score, f1_score
+from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
+from scipy.special import expit
+import numpy as np
 
 def visualize_events(event_file):
     event_dates=pd.read_csv(event_file)
@@ -103,44 +105,50 @@ def get_normal_dates(event_files, before, range_days, anomaly_dates):
     return sorted(list(normal_dates))
 
 
+
 def calc_scores(df, threshold, threshold_line, frequency, event_files, score_file, before_max):
     precision_scores = ["precision"]
     recall_scores = ["recall"]
     f1_scores = ["f1"]
+    auc_scores = ["auc"]
+
     df['Date'] = df['DATETIME'].dt.date
-    #all_dates = get_event_range(event_files,before_max)
-    #df = df[df["Date"].isin(anomaly_dates)]
-    anomaly_dates_full = get_event_range(event_files,before_max)
-    """ df = df[df['Date'].isin(anomaly_dates_full)]
-    df["Predicted"] = (df["AnomalyScore"] > threshold).astype(int)
-    df_normal = df[~df['Date'].isin(anomaly_dates_full)]
-    df_normal["Predicted"] = (df_normal["AnomalyScore"] > threshold).astype(int)
-    df_normal["Label"] = 0 """
-    normal_dates = get_normal_dates(event_files,before_max,before_max*3,anomaly_dates_full)
-    #import pdb;pdb.set_trace()
-    df_normal = df[df["Date"].isin(normal_dates)]
+    anomaly_dates_full = get_event_range(event_files, before_max)
+    normal_dates = get_normal_dates(event_files, before_max, before_max * 3, anomaly_dates_full)
+    df_normal = df[df["Date"].isin(normal_dates)].copy()
     df_normal["Predicted"] = (df_normal["AnomalyScore"] > threshold).astype(int)
     df_normal["Label"] = 0
-    for before in range(before_max+1):
-        anomaly_dates = get_anomaly_dates(event_files,before)
-        #event_dates = get_event_range(event_files,before)
-        df_anomaly = df[df["Date"].isin(anomaly_dates)]
+    log_likelihoods_scaled = (df["AnomalyScore"] - np.mean(df["AnomalyScore"])) / np.std(df["AnomalyScore"])
+    roc_scores = expit(log_likelihoods_scaled)
+
+    for before in range(before_max + 1):
+        anomaly_dates = get_anomaly_dates(event_files, before)
+        df_anomaly = df[df["Date"].isin(anomaly_dates)].copy()
         df_anomaly["Predicted"] = (df_anomaly["AnomalyScore"] > threshold).astype(int)
-        df_anomaly["Label"] = df_anomaly["Date"].isin(anomaly_dates).astype(int)
-        df_all = pd.concat([df_normal,df_anomaly])
-        #import pdb; pdb.set_trace()
-        precision = '{:.2f}'.format(precision_score(df_all["Label"], df_all["Predicted"]))
-        recall = '{:.2f}'.format(recall_score(df_all["Label"], df_all["Predicted"]))
-        f1 = '{:.2f}'.format(f1_score(df_all["Label"], df_all["Predicted"]))
+        df_anomaly["Label"] = 1
+        df_all = pd.concat([df_normal, df_anomaly])
+        y_true = df_all["Label"]
+        y_pred = df_all["Predicted"]
+
+        precision = '{:.2f}'.format(precision_score(y_true, y_pred))
+        recall = '{:.2f}'.format(recall_score(y_true, y_pred))
+        f1 = '{:.2f}'.format(f1_score(y_true, y_pred))
+        try:
+            auc = '{:.2f}'.format(roc_auc_score(y_true, roc_scores))
+        except ValueError:
+            auc = "NA"  # 片方のクラスしか存在しない場合
         precision_scores.append(precision)
         recall_scores.append(recall)
         f1_scores.append(f1)
-        with open(score_file,mode='w',newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow([frequency,f"threshold:{threshold_line}"])
-            writer.writerow(precision_scores)
-            writer.writerow(recall_scores)
-            writer.writerow(f1_scores)
+        auc_scores.append(auc)
+
+    with open(score_file, mode='w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow([frequency, f"threshold:{threshold_line}"])
+        writer.writerow(precision_scores)
+        writer.writerow(recall_scores)
+        writer.writerow(f1_scores)
+        writer.writerow(auc_scores)
 
 def plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files=None):
     df = pd.DataFrame({"DATETIME": timestamp, "AnomalyScore": anomaly_score})
