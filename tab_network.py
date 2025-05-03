@@ -1102,50 +1102,76 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
         Returns:
             res : output of reconstruction
             embedded_x : embedded input
-            obf_vars : which variable where obfuscated
+            obf_vars : which variable were obfuscated
         """
-        #import pdb; pdb.set_trace()
         batch_size, sequence_length, input_dim = x.size()
 
-        # (1) 埋め込み層：フレームごとに特徴量を埋め込み
+        # --- (1) 前バッチの末尾フレームを使って、冒頭に1フレーム追加 ---
+        if hasattr(self, "X_old") and self.X_old is not None:
+            # 各バッチの先頭1フレームを取り出して [batch_size, 1, input_dim]
+            x_first = x[:, 0:1, :]
+            # 前のバッチから引き継いだ sequence_length - 1 フレームと結合
+            x = torch.cat([self.X_old, x_first], dim=1)  # shape: [batch_size, sequence_length, input_dim]
+
+        # --- (2) 現バッチの末尾から sequence_length - 1 フレームを保存しておく ---
+        self.X_old = x[:, - (sequence_length - 1):, :].detach().clone()  # 保存
+
+        # --- (3) 埋め込み ---
         x = x.view(-1, input_dim)  # [batch_size * sequence_length, input_dim]
         embedded_x = self.embedder(x)  # [batch_size * sequence_length, embed_dim]
 
         if self.training:
-            # (2) マスク：特徴量の一部を隠す
-            masked_x, obfuscated_groups, obfuscated_vars = self.masker(embedded_x,sequence_length)
+            # --- (4) マスク ---
+            masked_x, obfuscated_groups, obfuscated_vars = self.masker(embedded_x, sequence_length)
             prior = 1 - obfuscated_groups
+
             masked_x = masked_x.view(batch_size * sequence_length, input_dim)
             prior = prior.view(batch_size * sequence_length, input_dim)
 
-            # (3) エンコーダー：ステップごとの出力（リスト）を得る
-            steps_out, _ = self.encoder(masked_x, prior=prior)  # list of [batch_size * seq_len, embed_dim]
+            # --- (5) エンコーダー ---
+            steps_out, _ = self.encoder(masked_x, prior=prior)  # list of [batch_size * sequence_length, embed_dim]
 
-            # (4) Self-Attention をフレーム間に適用（ステップは維持）
-            steps_out = torch.stack(steps_out, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
+            # --- (6) Self Attention over time axis ---
+            steps_out = torch.stack(steps_out, dim=1)  # [batch_size * seq_len, n_steps, feat_dim]
             steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
-            # attention over time axis (dim=2)
-            steps_out = self.self_attn(steps_out)
+            steps_out = self.self_attn(steps_out)  # attention along seq axis
 
-            # (5) Decoder
+            # --- (7) Decoder ---
             res = self.decoder(steps_out)
-            return res, embedded_x, obfuscated_vars
+            
+            # (8) 最後のフレームのみ抽出して返す
+            embedded_x = embedded_x.view(batch_size, sequence_length, -1)
+            embedded_x_last = embedded_x[:, -1]  # [batch_size, embed_dim]
+
+            obf_vars = obfuscated_vars.view(batch_size, sequence_length, -1)
+            obf_vars_last = obf_vars[:, -1]      # [batch_size, input_dim]
+
+            return res, embedded_x_last, obf_vars_last
+
 
         else:
-            # Validation/Test 時
-            steps_out, _ = self.encoder(embedded_x)  # list of [batch_size * sequence_length, feat_dim]
+            # --- Validation / Test ---
+            steps_out, _ = self.encoder(embedded_x)  # list of [batch_size * sequence_length, embed_dim]
 
-            # 同様に Attention 適用
             steps_out = torch.stack(steps_out, dim=1)
             steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
             steps_out = steps_out.permute(0, 2, 1, 3)
             steps_out = self.self_attn(steps_out)
 
             res = self.decoder(steps_out)
-            return res, embedded_x, torch.ones(embedded_x.shape).to(x.device)
+            embedded_x = embedded_x.view(batch_size, sequence_length, -1)
+            embedded_x_last = embedded_x[:, -1]
+            return res, embedded_x_last, torch.ones_like(embedded_x_last)
+
 
     def forward_masks(self, x):
         embedded_x = self.embedder(x)
         return self.encoder.forward_masks(embedded_x)
+    
+    def reset_memory(self):
+        """
+        Reset the memory of the model.
+        """
+        self.X_old = None

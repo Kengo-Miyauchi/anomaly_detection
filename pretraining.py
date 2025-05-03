@@ -64,7 +64,8 @@ class TabNetPretrainer(TabModel):
         callbacks=None,
         pin_memory=True,
         warm_start=False,
-        use_self_attn=True,
+        mask_by_table=False,
+        use_self_attn=False,
         sequence_length=3
     ):
         """Train a neural network stored in self.network
@@ -120,6 +121,7 @@ class TabNetPretrainer(TabModel):
         self.pin_memory = pin_memory and (self.device.type != "cpu")
         self.pretraining_ratio = pretraining_ratio
         eval_set = eval_set if eval_set else []
+        self.mask_by_table = mask_by_table
         self.use_self_attn = use_self_attn
         self.sequence_length = sequence_length
 
@@ -182,7 +184,7 @@ class TabNetPretrainer(TabModel):
             self.pretraining_ratio = 0.5
         torch.manual_seed(self.seed)
         self.group_matrix = create_group_matrix(self.grouped_features, self.input_dim)
-        if self.use_self_attn:
+        if self.mask_by_table:
             self.network = tab_network.TimeSeriesTabNetPretraining(
                 self.input_dim,
                 pretraining_ratio=self.pretraining_ratio,
@@ -319,7 +321,7 @@ class TabNetPretrainer(TabModel):
             DataLoader with train set
         """
         self.network.train()
-
+        self.network.reset_memory()
         for batch_idx, X in enumerate(train_loader):
             self._callback_container.on_batch_begin(batch_idx)
 

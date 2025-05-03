@@ -114,7 +114,7 @@ def create_series_dataloaders(
         )
     else:
         train_dataloader = DataLoader(
-            TimeSeriesDatasetBySequence(X_train,sequence_length),
+            ShiftedTimeSeriesDataset(X_train,sequence_length),
             batch_size=batch_size,
             sampler=sampler,
             shuffle=need_shuffle,
