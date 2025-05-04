@@ -19,8 +19,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '10M'
-threshold_line = 100 - 0.01
+frequency = '1S'
+sequence_length = 10
+threshold_line = 100 - 1
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"
 if(frequency=='1S' or 'sampled' in frequency):
@@ -54,9 +55,9 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = "tabnet-self-attn2"
+model_name = f"tabnet-self-attn2-{sequence_length}seq"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/tabnet-self-attn2-40dim"
+path_to_pretrained = f"model/haenkaze/tabnet-self-attn2-40dim-{sequence_length}seq"
 config = set_config_file()
 exec_model = ExecModel(
     device=device,
@@ -67,8 +68,8 @@ exec_model = ExecModel(
     path_to_pretrained=path_to_pretrained
 )
 out_dir = exec_model.out_dir
-""" if exec_model.use_self_attn:
-    timestamp = SCADA_utils.median_timestamps(timestamp, exec_model.sequence_length) """
+if exec_model.use_self_attn:
+    timestamp = SCADA_utils.median_timestamps(timestamp, sequence_length)
 
 # convert data to tabnet encoder features
 print("Start feature extraction")
@@ -122,7 +123,7 @@ df = df.drop(remove_indices)
 #df['Date'] = df['DATETIME'].dt.date
 
 #import pdb; pdb.set_trace()
-
+timestamp = timestamp[:len(anomaly_score)]
 #img_path = out_dir + "/"+frequency+"_gmm_" + str(n_components) + "components.png"
 log_plot = False
 if log_plot:img_path = f"{out_dir}/{frequency}_log.png"

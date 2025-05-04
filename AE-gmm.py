@@ -18,7 +18,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # download data
 stampcol = "DateTime"
 frequency = '1S'
-threshold_line = 100 - 0.0005
+threshold_line = 100 - 1
 dataset_name = "haenkaze"
 data_path = "/mnt/work-qnap/miyauchi"
 if(frequency=='1S' or 'sampled' in frequency):

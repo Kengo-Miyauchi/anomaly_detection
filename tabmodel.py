@@ -50,8 +50,8 @@ for file_path in file_list:
         gc.collect()
 
 # set execute model
-#model_name = "tabnet-pretrain-out2023"
-model_name = "tabnet-self-attn2"
+#model_name = "tabnet-pretrain-tout2023"
+model_name = "tabnet-self-attn"
 config = set_config_file()
 exec_model = ExecModel(device,config,dataset_name,model_name,X_train,X_valid)
 out_dir = exec_model.out_dir

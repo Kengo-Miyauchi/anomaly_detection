@@ -28,3 +28,15 @@
 2025-04-30 00:26:08,929 - INFO - epoch  27 | loss:  825.8042,  val_0_unsup_loss_numpy: 2158.9971
 2025-04-30 00:55:12,181 - INFO - epoch  28 | loss:  840.6455,  val_0_unsup_loss_numpy: 2201.1465
 2025-04-30 01:24:15,888 - INFO - epoch  29 | loss:  611.6697,  val_0_unsup_loss_numpy: 2965.1521
+2025-04-30 01:53:36,818 - INFO - epoch  30 | loss:  334.4501,  val_0_unsup_loss_numpy: 2700.3167
+2025-04-30 02:22:55,051 - INFO - epoch  31 | loss:  900.0211,  val_0_unsup_loss_numpy: 2618.4084
+2025-04-30 02:52:15,537 - INFO - epoch  32 | loss:  671.8893,  val_0_unsup_loss_numpy: 1968.7638
+2025-04-30 03:21:37,045 - INFO - epoch  33 | loss:  224.7850,  val_0_unsup_loss_numpy: 2201.8059
+2025-04-30 03:50:56,843 - INFO - epoch  34 | loss:  604.0302,  val_0_unsup_loss_numpy: 1246.5454
+2025-04-30 04:20:14,019 - INFO - epoch  35 | loss:  190.8949,  val_0_unsup_loss_numpy: 1375.9550
+2025-04-30 04:49:32,112 - INFO - epoch  36 | loss:  254.5636,  val_0_unsup_loss_numpy:  843.8228
+2025-04-30 05:18:52,819 - INFO - epoch  37 | loss:  171.1801,  val_0_unsup_loss_numpy:  947.6670
+2025-04-30 05:48:12,947 - INFO - epoch  38 | loss:  493.7580,  val_0_unsup_loss_numpy:  495.3243
+2025-04-30 06:17:28,187 - INFO - epoch  39 | loss:  123.2372,  val_0_unsup_loss_numpy:  474.1241
+2025-04-30 06:46:48,135 - INFO - epoch  40 | loss:   91.1003,  val_0_unsup_loss_numpy:  382.6404
+2025-04-30 06:46:48,363 - INFO - TabNet pretraining finished.

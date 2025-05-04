@@ -5,7 +5,7 @@ import csv
 from datetime import datetime, timedelta
 from sklearn.metrics import precision_score, recall_score, f1_score, roc_auc_score
 from scipy.special import expit
-import numpy as np
+
 
 def visualize_events(event_file):
     event_dates=pd.read_csv(event_file)
@@ -118,8 +118,6 @@ def calc_scores(df, threshold, threshold_line, frequency, event_files, score_fil
     df_normal = df[df["Date"].isin(normal_dates)].copy()
     df_normal["Predicted"] = (df_normal["AnomalyScore"] > threshold).astype(int)
     df_normal["Label"] = 0
-    log_likelihoods_scaled = (df["AnomalyScore"] - np.mean(df["AnomalyScore"])) / np.std(df["AnomalyScore"])
-    roc_scores = expit(log_likelihoods_scaled)
 
     for before in range(before_max + 1):
         anomaly_dates = get_anomaly_dates(event_files, before)
@@ -129,10 +127,17 @@ def calc_scores(df, threshold, threshold_line, frequency, event_files, score_fil
         df_all = pd.concat([df_normal, df_anomaly])
         y_true = df_all["Label"]
         y_pred = df_all["Predicted"]
+        #import pdb; pdb.set_trace()
 
         precision = '{:.2f}'.format(precision_score(y_true, y_pred))
         recall = '{:.2f}'.format(recall_score(y_true, y_pred))
         f1 = '{:.2f}'.format(f1_score(y_true, y_pred))
+        
+        raw_scores = df_all["AnomalyScore"].values
+        mean = raw_scores.mean()
+        std = raw_scores.std() if raw_scores.std() > 0 else 1
+        scaled_scores = (raw_scores - mean) / std
+        roc_scores = expit(scaled_scores)
         try:
             auc = '{:.2f}'.format(roc_auc_score(y_true, roc_scores))
         except ValueError:

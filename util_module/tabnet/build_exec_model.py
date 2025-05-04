@@ -10,7 +10,7 @@ class ExecModel:
     def __init__(self, device, config, dataset_name, model_name, X_train, X_valid=None, refit=False,
                  feature_dim=None, n_steps=None, optimizer_params=None, batch_size_pre=None, batch_size_tr=None,
                  covariance_type=None, pretraining_ratio=None, max_epochs=None,path_to_pretrained=None,
-                 use_self_attn=False, sequence_length=None):
+                 mask_by_table=False, use_self_attn=False, sequence_length=None):
         self.device = device
         self.config = config
         self.dataset_name = dataset_name
@@ -27,6 +27,7 @@ class ExecModel:
         self.pretraining_ratio = pretraining_ratio
         self.max_epochs = max_epochs
         self.path_to_pretrained = path_to_pretrained
+        self.mask_by_table = mask_by_table
         self.use_self_attn = use_self_attn
         self.sequence_length = sequence_length
         
@@ -43,7 +44,7 @@ class ExecModel:
         
         if(os.path.exists(self.path_to_pretrained+"/pretrained.pth")):
             print(f"Load model from {self.path_to_pretrained}/pretrained.pth")
-            self.unsupervised_model=torch.load(self.path_to_pretrained+"/pretrained.pth")
+            self.unsupervised_model=torch.load(self.path_to_pretrained+"/pretrained.pth",weights_only=False)
             if(self.refit):
                 self.set_log(filepath=self.path_to_pretrained + '/pretraining_refit.log')
                 #self.unsupervised_model=self.set_unsupervised_model()
@@ -84,6 +85,7 @@ class ExecModel:
             batch_size=self.batch_size_pre, virtual_batch_size=128,
             pretraining_ratio=self.pretraining_ratio,
             callbacks=[LogCallback()],
+            mask_by_table=self.mask_by_table,
             use_self_attn = self.use_self_attn,
             sequence_length = self.sequence_length,
         )

@@ -43,37 +43,29 @@ class TimeSeriesDataset(Dataset):
         seq = self.data[idx:idx + self.sequence_length]
         return seq
 
-class NonOverlappingTimeSeriesDataset(Dataset):
+class TimeSeriesDatasetBySequence(Dataset):
     def __init__(self, data, sequence_length):
         """
-        Parameters
-        ----------
-        data : [total_time_steps, input_dim]
-        sequence_length : int
-            Number of time steps per sample
+        data: [total_time_steps, input_dim]
+        sequence_length: int
         """
         self.data = torch.tensor(data, dtype=torch.float32)
         self.sequence_length = sequence_length
-        self.total_length = len(self.data)
 
-        # ブロック数（端数があれば +1）
-        self.num_sequences = (self.total_length + sequence_length - 1) // sequence_length
+        # シーケンス長で割り切れる最大の範囲に制限
+        total_length = (len(self.data) // sequence_length) * sequence_length
+        self.data = self.data[:total_length]  # 余りをカット
+
+        self.num_sequences = total_length // sequence_length
 
     def __len__(self):
         return self.num_sequences
 
     def __getitem__(self, idx):
-        start = idx * self.sequence_length
-        end = min(start + self.sequence_length, self.total_length)
-        seq = self.data[start:end]
-
-        # sequence_length に満たない場合、padding（ゼロ埋め）を行う
-        if end - start < self.sequence_length:
-            padding_size = self.sequence_length - (end - start)
-            padding = torch.zeros(padding_size, seq.shape[1], dtype=seq.dtype)
-            seq = torch.cat([seq, padding], dim=0)
-
-        return seq  # shape: [sequence_length, input_dim]
+        start_idx = idx * self.sequence_length
+        end_idx = start_idx + self.sequence_length
+        seq = self.data[start_idx:end_idx]  # shape: [sequence_length, input_dim]
+        return seq
 
 def create_dataloader(X,batch_size,need_shuffle):
     dataloader = DataLoader(
@@ -97,7 +89,7 @@ def create_shifted_dataloader(X,sequence_length,batch_size,need_shuffle):
 
 def create_sequence_dataloader(X,sequence_length,batch_size,need_shuffle):
     dataloader = DataLoader(
-        NonOverlappingTimeSeriesDataset(X.astype(np.float32), sequence_length),
+        TimeSeriesDatasetBySequence(X.astype(np.float32), sequence_length),
         batch_size=batch_size,
         shuffle=need_shuffle,
         pin_memory=True,
@@ -122,18 +114,10 @@ def data_to_TabNetFeatures(exec_model,data,need_shuffle=False):
                 
                 step_outputs, _ = exec_model.unsupervised_model.network.encoder(embedded_x)
                 
-                """ step_outputs = torch.stack(step_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
+                step_outputs = torch.stack(step_outputs, dim=1)  # [batch_size*seq_len, n_steps, feat_dim]
                 step_outputs = step_outputs.view(batch_size, sequence_length, n_steps, -1)
                 step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
-
-                # attention over time axis (dim=2)
-                step_outputs = step_outputs.reshape(batch_size * n_steps, sequence_length, -1)
-                step_outputs, _ = exec_model.unsupervised_model.network.self_attn(step_outputs, step_outputs, step_outputs)
-                step_outputs = step_outputs.view(batch_size, n_steps, sequence_length, -1)
-
-                step_outputs = step_outputs.permute(0, 2, 1, 3)  # [batch_size, seq_len, n_steps, feat_dim]
-                step_outputs = step_outputs.reshape(batch_size * sequence_length, n_steps, -1)
-                step_outputs = torch.unbind(step_outputs, dim=1) """
+                step_outputs = exec_model.unsupervised_model.network.self_attn(step_outputs)
             else:
                 batch = exec_model.unsupervised_model.network.embedder(batch)
                 step_outputs, _ = exec_model.unsupervised_model.network.encoder(batch)
