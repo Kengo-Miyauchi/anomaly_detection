@@ -978,7 +978,7 @@ class SequenceAwareObfuscator(torch.nn.Module):
         self.group_matrix = (group_matrix > 0) + 0.
         self.num_groups = group_matrix.shape[0]
 
-    def forward(self, x, sequence_length):
+    def forward(self, x):
         """
         Parameters
         ----------
@@ -992,21 +992,17 @@ class SequenceAwareObfuscator(torch.nn.Module):
         obfuscated_groups : [batch_size, num_groups]
         obfuscated_vars : [batch_size * sequence_length, input_dim]
         """
-        batch_size = x.shape[0]//sequence_length
+        input_size = x.shape[0]
 
         # Generate obfuscation mask per group per sample (not per frame)
         obfuscated_groups = torch.bernoulli(
-            self.pretraining_ratio * torch.ones((batch_size, self.num_groups), device=x.device)
+            self.pretraining_ratio * torch.ones((input_size, self.num_groups), device=x.device)
         )  # [B, G]
 
-        # Expand to sequence
-        obfuscated_groups_seq = obfuscated_groups.unsqueeze(1).expand(-1, sequence_length, -1)  # [B, L, G]
-        obfuscated_groups_seq = obfuscated_groups_seq.reshape(batch_size * sequence_length, self.num_groups)  # [B*L, G]
-
-        obfuscated_vars = torch.matmul(obfuscated_groups_seq, self.group_matrix)  # [B*L, D]
+        obfuscated_vars = torch.matmul(obfuscated_groups, self.group_matrix)  # [B*L, D]
         masked_input = (1 - obfuscated_vars) * x
 
-        return masked_input, obfuscated_groups_seq, obfuscated_vars
+        return masked_input, obfuscated_groups, obfuscated_vars
 
     
 # TabNet Pretraining with Self Attention for Time Series Analysis
@@ -1122,7 +1118,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
 
         if self.training:
             # --- (4) マスク ---
-            masked_x, obfuscated_groups, obfuscated_vars = self.masker(embedded_x, sequence_length)
+            masked_x, obfuscated_groups, obfuscated_vars = self.masker(embedded_x)
             prior = 1 - obfuscated_groups
 
             masked_x = masked_x.view(batch_size * sequence_length, input_dim)
@@ -1137,14 +1133,14 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
             steps_out = self.self_attn(steps_out)  # attention along seq axis
-
+            steps_out = [step.view(batch_size, sequence_length, step.size(-1)) for step in steps_out]  # [batch_size * seq_len, n_steps, feat_dim]
             # --- (7) Decoder ---
+            steps_out = [step[:, -1, :] for step in steps_out]  # 各stepの最後のフレームを抽出してDecoderに渡す
             res = self.decoder(steps_out)
             
             # (8) 最後のフレームのみ抽出して返す
             embedded_x = embedded_x.view(batch_size, sequence_length, -1)
             embedded_x_last = embedded_x[:, -1]  # [batch_size, embed_dim]
-
             obf_vars = obfuscated_vars.view(batch_size, sequence_length, -1)
             obf_vars_last = obf_vars[:, -1]      # [batch_size, input_dim]
 
@@ -1153,14 +1149,17 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
 
         else:
             # --- Validation / Test ---
-            steps_out, _ = self.encoder(embedded_x)  # list of [batch_size * sequence_length, embed_dim]
-
+            steps_out, _ = self.encoder(embedded_x)
+            
             steps_out = torch.stack(steps_out, dim=1)
             steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
             steps_out = steps_out.permute(0, 2, 1, 3)
             steps_out = self.self_attn(steps_out)
-
+            steps_out = [step.view(batch_size, sequence_length, step.size(-1)) for step in steps_out]
+            
+            steps_out = [step[:, -1, :] for step in steps_out]
             res = self.decoder(steps_out)
+            
             embedded_x = embedded_x.view(batch_size, sequence_length, -1)
             embedded_x_last = embedded_x[:, -1]
             return res, embedded_x_last, torch.ones_like(embedded_x_last)
