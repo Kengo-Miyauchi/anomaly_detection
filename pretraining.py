@@ -288,7 +288,7 @@ class TabNetPretrainer(TabModel):
             List of validation dataloaders.
 
         """
-        if self.use_self_attn:
+        if self.mask_by_table:
             train_dataloader, valid_dataloaders = create_series_dataloaders(
                 X_train,
                 eval_set,

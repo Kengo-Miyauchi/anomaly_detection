@@ -965,7 +965,39 @@ class SelfAttention(torch.nn.Module):
         attn_output = attn_output.reshape(batch_size * sequence_length, n_steps, -1)
         attn_output = torch.unbind(attn_output, dim=1)  # list of [batch_size*sequence_length, feat_dim]
         return attn_output
-    
+
+class CausalSelfAttention(torch.nn.Module):
+    def __init__(self, embed_dim, num_heads=4, dropout=0.1):
+        super(SelfAttention, self).__init__()
+        self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
+        self.norm = torch.nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape [batch_size, n_steps, seq_len, feat_dim]
+        Returns:
+            List of tensors of shape [batch_size, feat_dim], length = n_steps
+        """
+        batch_size, n_steps, seq_len, feat_dim = x.shape
+
+        # Reshape to [batch_size * n_steps, seq_len, feat_dim]
+        x = x.reshape(batch_size * n_steps, seq_len, feat_dim)
+
+        # Use only the last frame as query
+        q = x[:, -1:, :]  # [B*n_steps, 1, D]
+        k = x             # [B*n_steps, T, D]
+        v = x             # [B*n_steps, T, D]
+
+        attn_output, _ = self.attention(q, k, v)  # [B*n_steps, 1, D]
+        attn_output = self.norm(attn_output + q)  # Residual + Norm
+        attn_output = attn_output.squeeze(1)      # [B*n_steps, D]
+
+        # Split to list of [B, D] per step
+        attn_output = attn_output.view(batch_size, n_steps, feat_dim)
+        attn_output = torch.unbind(attn_output, dim=1)  # list of [B, D], length = n_steps
+
+        return attn_output   
 
 # masker for sequence-wise masking
 class SequenceAwareObfuscator(torch.nn.Module):
@@ -1087,7 +1119,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = SelfAttention(embed_dim=n_d, num_heads=4,dropout=0)
+        self.self_attn = CausalSelfAttention(embed_dim=n_d, num_heads=4,dropout=0)
         print("Using Self Attention")
 
 
@@ -1120,9 +1152,8 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             # --- (4) マスク ---
             masked_x, obfuscated_groups, obfuscated_vars = self.masker(embedded_x)
             prior = 1 - obfuscated_groups
-
             masked_x = masked_x.view(batch_size * sequence_length, input_dim)
-            prior = prior.view(batch_size * sequence_length, input_dim)
+            prior = prior.view(batch_size * sequence_length, input_dim) 
 
             # --- (5) エンコーダー ---
             steps_out, _ = self.encoder(masked_x, prior=prior)  # list of [batch_size * sequence_length, embed_dim]
@@ -1133,9 +1164,8 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
 
             steps_out = self.self_attn(steps_out)  # attention along seq axis
-            steps_out = [step.view(batch_size, sequence_length, step.size(-1)) for step in steps_out]  # [batch_size * seq_len, n_steps, feat_dim]
+            
             # --- (7) Decoder ---
-            steps_out = [step[:, -1, :] for step in steps_out]  # 各stepの最後のフレームを抽出してDecoderに渡す
             res = self.decoder(steps_out)
             
             # (8) 最後のフレームのみ抽出して返す
