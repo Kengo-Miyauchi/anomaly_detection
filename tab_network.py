@@ -968,7 +968,7 @@ class SelfAttention(torch.nn.Module):
 
 class CausalSelfAttention(torch.nn.Module):
     def __init__(self, embed_dim, num_heads=4, dropout=0.1):
-        super(SelfAttention, self).__init__()
+        super(CausalSelfAttention, self).__init__()
         self.attention = torch.nn.MultiheadAttention(embed_dim, num_heads, dropout=dropout, batch_first=True)
         self.norm = torch.nn.LayerNorm(embed_dim)
 
