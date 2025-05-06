@@ -999,6 +999,41 @@ class CausalSelfAttention(torch.nn.Module):
 
         return attn_output   
 
+class LightCausalAttention(torch.nn.Module):
+    def __init__(self, embed_dim):
+        super(LightCausalAttention, self).__init__()
+        self.query_proj = torch.nn.Linear(embed_dim, embed_dim)
+        self.key_proj = torch.nn.Linear(embed_dim, embed_dim)
+        self.value_proj = torch.nn.Linear(embed_dim, embed_dim)
+        self.softmax = torch.nn.Softmax(dim=-1)
+        self.norm = torch.nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        """
+        x: (batch_size, n_steps, seq_len, feat_dim)
+        """
+        batch_size, n_steps, seq_len, feat_dim = x.shape
+
+        x = x.reshape(batch_size * n_steps, seq_len, feat_dim)
+
+        # 最後のフレームの query
+        q = self.query_proj(x[:, -1:, :])  # [B*n_steps, 1, D]
+        k = self.key_proj(x)              # [B*n_steps, T, D]
+        v = self.value_proj(x)            # [B*n_steps, T, D]
+
+        # Attention weights (causal: 最後のフレームが過去を参照)
+        scores = torch.matmul(q, k.transpose(-2, -1)) / (feat_dim ** 0.5)  # [B*n_steps, 1, T]
+        weights = self.softmax(scores)  # [B*n_steps, 1, T]
+
+        attn_output = torch.matmul(weights, v)  # [B*n_steps, 1, D]
+        attn_output = self.norm(attn_output + q)        # Residual + Norm
+        attn_output = attn_output.squeeze(1)            # [B*n_steps, D]
+
+        # Split to list of [B, D] per step
+        attn_output = attn_output.view(batch_size, n_steps, feat_dim)
+        attn_output = torch.unbind(attn_output, dim=1)  # list of [B, D]
+        return attn_output
+
 # masker for sequence-wise masking
 class SequenceAwareObfuscator(torch.nn.Module):
     """
@@ -1119,7 +1154,7 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = CausalSelfAttention(embed_dim=n_d, num_heads=4,dropout=0)
+        self.self_attn = LightCausalAttention(embed_dim=n_d, num_heads=4,dropout=0)
         print("Using Self Attention")
 
 
