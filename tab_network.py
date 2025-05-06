@@ -1034,6 +1034,46 @@ class LightCausalAttention(torch.nn.Module):
         attn_output = torch.unbind(attn_output, dim=1)  # list of [B, D]
         return attn_output
 
+
+class CausalConvAttention(torch.nn.Module):
+    def __init__(self, embed_dim, kernel_size=3, dropout=0.1):
+        super(CausalConvAttention, self).__init__()
+        self.kernel_size = kernel_size
+        self.conv1d = torch.nn.Conv1d(
+            in_channels=embed_dim,
+            out_channels=embed_dim,
+            kernel_size=kernel_size,
+            padding=kernel_size - 1,  # causal padding
+        )
+        self.dropout = torch.nn.Dropout(dropout)
+        self.norm = torch.nn.LayerNorm(embed_dim)
+
+    def forward(self, x):
+        """
+        Args:
+            x: Tensor of shape [batch_size, n_steps, seq_len, embed_dim]
+        Returns:
+            List of Tensors of shape [batch_size, embed_dim], length = n_steps
+        """
+        batch_size, n_steps, seq_len, embed_dim = x.size()
+
+        # Prepare input: [B, n_steps, seq_len, D] → [B, D, n_steps, seq_len]
+        x = x.permute(0, 3, 1, 2).contiguous()
+        x = x.view(batch_size * embed_dim, n_steps, seq_len)  # [B*D, n_steps, seq_len]
+
+        # Apply 1D conv along seq_len (time)
+        out = self.conv1d(x)  # [B*D, n_steps, seq_len + pad]
+        out = out[:, :, :seq_len]  # remove look-ahead padding
+        out = out.view(batch_size, embed_dim, n_steps, seq_len)
+        out = out.permute(0, 2, 3, 1).contiguous()  # [B, n_steps, seq_len, D]
+
+        # Take last frame only
+        out = out[:, :, -1, :]  # [B, n_steps, D]
+        out = self.norm(out) + self.dropout(out)
+
+        # Split into list of [B, D]
+        return [out[:, i, :] for i in range(n_steps)]
+
 # masker for sequence-wise masking
 class SequenceAwareObfuscator(torch.nn.Module):
     """
@@ -1154,7 +1194,8 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = LightCausalAttention(embed_dim=n_d)
+        #self.self_attn = LightCausalAttention(embed_dim=n_d)
+        self.self_attn = CausalConvAttention(embed_dim=n_d, kernel_size=3, dropout=0.1)
         print("Using Self Attention")
 
 
