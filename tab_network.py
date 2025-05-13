@@ -1154,7 +1154,8 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             virtual_batch_size=virtual_batch_size,
             momentum=momentum,
         )
-        self.self_attn = LightCausalAttention(embed_dim=n_d)
+        #self.self_attn = LightCausalAttention(embed_dim=n_d)
+        self.self_attn = CausalConvAttention(embed_dim=n_d, kernel_size=3, dropout=0.1)
         print("Using Self Attention")
 
 
