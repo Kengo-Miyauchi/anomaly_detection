@@ -1262,7 +1262,6 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = steps_out.permute(0, 2, 1, 3)
             steps_out = self.self_attn(steps_out)
             
-            steps_out = [step[:, -1, :] for step in steps_out]
             res = self.decoder(steps_out)
             
             embedded_x = embedded_x.view(batch_size, sequence_length, -1)
