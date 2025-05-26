@@ -1238,7 +1238,6 @@ class TimeSeriesTabNetPretraining(torch.nn.Module):
             steps_out = torch.stack(steps_out, dim=1)  # [batch_size * seq_len, n_steps, feat_dim]
             steps_out = steps_out.view(batch_size, sequence_length, self.n_steps, -1)
             steps_out = steps_out.permute(0, 2, 1, 3)  # [batch_size, n_steps, seq_len, feat_dim]
-
             steps_out = self.self_attn(steps_out)  # attention along seq axis
             
             # --- (7) Decoder ---
