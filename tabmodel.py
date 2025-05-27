@@ -14,11 +14,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"device: {device}")
 # download data
 dataset_name = "haenkaze"
-data_path = "/mnt/work-qnap/miyauchi"
+base_path = "/mnt/work-qnap/miyauchi"
 
 # preprocessing
-target_file = f'{data_path}/data/{dataset_name}/fixed_data/2023_fixed.parquet'
-parquet_file = f'{data_path}/data/{dataset_name}/fixed_data/2024_fixed.parquet'
+target_file = f'{base_path}/data/{dataset_name}/fixed_data/2023_fixed.parquet'
+parquet_file = f'{base_path}/data/{dataset_name}/fixed_data/2024_fixed.parquet'
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 stampcol = "DateTime"
@@ -33,7 +33,7 @@ del valid
 gc.collect()
 print("Finished loading data.")
 
-data_dir =f'{data_path}/data/haenkaze/fixed_data'
+data_dir =f'{base_path}/data/haenkaze/fixed_data'
 file_list = [os.path.join(data_dir, file) for file in os.listdir(data_dir)]
 for file_path in file_list:
     if((file_path != parquet_file) and (file_path != target_file)):

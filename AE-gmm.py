@@ -20,11 +20,11 @@ stampcol = "DateTime"
 frequency = '1S'
 threshold_line = 100 - 1
 dataset_name = "haenkaze"
-data_path = "/mnt/work-qnap/miyauchi"
+base_path = "/mnt/work-qnap/miyauchi"
 if(frequency=='1S' or 'sampled' in frequency):
-    parquet_file = f'{data_path}/data/{dataset_name}/2023_'+frequency+'_data.parquet'
+    parquet_file = f'{base_path}/data/{dataset_name}/2023_'+frequency+'_data.parquet'
 else:
-    parquet_file = f'{data_path}/data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
+    parquet_file = f'{base_path}/data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 #data = utils.fix_data(data)
@@ -53,8 +53,8 @@ X_test = X_test.astype(np.float16)
 
 # set AutoEncoder model
 model_name = "AE-gmm"
-#path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = "model/haenkaze/autoencoder/autoencoder_40dim.pth"
+#path_to_pretrained = f"{base_path}/model/haenkaze/tabnet-pretrain-out2023-40dim"
+path_to_pretrained = f"{base_path}/model/haenkaze/autoencoder/autoencoder_40dim.pth"
 print(f"Load model from {path_to_pretrained}")
 model = AutoEncoder(input_dim=X_train.shape[1], hidden_dim=40).to(device)
 model.load_state_dict(torch.load(path_to_pretrained))
@@ -72,15 +72,15 @@ del X_train
 del X_test
 print("Finish feature extraction")
 
-event_files = [f"{data_path}/data/haenkaze/events.csv"]
-event_files.append(f"{data_path}/data/haenkaze/event_range.csv")
+event_files = [f"{base_path}/data/haenkaze/events.csv"]
+event_files.append(f"{base_path}/data/haenkaze/event_range.csv")
 score_file = f"result/haenkaze/{model_name}/{frequency}scores.csv"
 #os.makedirs(score_file, exist_ok=True)
 n_components = 10
 
 # GMM training
 isTrain = False
-path_to_gmm = f"model/haenkaze/{model_name}"
+path_to_gmm = f"{base_path}/model/haenkaze/{model_name}"
 os.makedirs(path_to_gmm, exist_ok=True)
 gmm_model = f"{path_to_gmm}/gmm_{frequency}.pkl"
 if os.path.exists(gmm_model) and not isTrain:

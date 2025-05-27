@@ -7,7 +7,7 @@ import os
 from matplotlib import pyplot as plt
 
 class ExecModel:
-    def __init__(self, device, config, dataset_name, model_name, X_train, X_valid=None, refit=False,
+    def __init__(self, device, config, dataset_name, model_name, X_train=None, X_valid=None, refit=False,
                  feature_dim=None, n_steps=None, optimizer_params=None, batch_size_pre=None, batch_size_tr=None,
                  covariance_type=None, pretraining_ratio=None, max_epochs=None,path_to_pretrained=None,
                  mask_by_table=False, use_self_attn=False, sequence_length=None):
@@ -37,8 +37,8 @@ class ExecModel:
         self.out_dir = self.set_out_dir()
         os.makedirs(self.out_dir, exist_ok=True)
         if(self.path_to_pretrained==None):
-            self.path_to_pretrained = f'./model/{dataset_name}/{model_name}-{str(self.feature_dim)}dim'
-            if self.use_self_attn:
+            self.path_to_pretrained = f'/mnt/iot-qnap5/miyauchi/model/{dataset_name}/{model_name}-{str(self.feature_dim)}dim'
+            if self.mask_by_table:
                 self.path_to_pretrained += f"-{self.sequence_length}seq"
         os.makedirs(self.path_to_pretrained, exist_ok=True)
         

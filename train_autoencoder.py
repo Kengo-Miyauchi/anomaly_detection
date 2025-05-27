@@ -14,11 +14,11 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"device: {device}")
 # download data
 dataset_name = "haenkaze"
-data_path = "/mnt/work-qnap/miyauchi"
+base_path = "/mnt/work-qnap/miyauchi"
 
 # preprocessing
-target_file = f'{data_path}/data/{dataset_name}/fixed_data/2023_fixed.parquet'
-parquet_file = f'{data_path}/data/{dataset_name}/fixed_data/2024_fixed.parquet'
+target_file = f'{base_path}/data/{dataset_name}/fixed_data/2023_fixed.parquet'
+parquet_file = f'{base_path}/data/{dataset_name}/fixed_data/2024_fixed.parquet'
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
 stampcol = "DateTime"
@@ -33,7 +33,7 @@ del valid
 gc.collect()
 print("Finished loading data.")
 
-data_dir =f'{data_path}/data/haenkaze/fixed_data'
+data_dir =f'{base_path}/data/haenkaze/fixed_data'
 file_list = [os.path.join(data_dir, file) for file in os.listdir(data_dir)]
 for file_path in file_list:
     if((file_path != parquet_file) and (file_path != target_file)):
@@ -57,7 +57,7 @@ batch_size = 1024
 learning_rate = 1e-3
 
 # ログファイル準備
-log_dir = f'model/{dataset_name}/autoencoder/'
+log_dir = f"{base_path}/model/{dataset_name}/autoencoder/"
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f'log_{hidden_dim}dim.txt')
 
@@ -102,7 +102,7 @@ with open(log_file, 'w') as f_log:
         f_log.write(f'Epoch [{epoch+1}/{num_epochs}], Loss: {avg_loss:.6f}, Time: {int(hours)}h {int(minutes)}m {int(seconds)}s\n')
 
 # 学習済みモデルの保存
-path_to_model = f'model/{dataset_name}/autoencoder'
+path_to_model = f"{base_path}/model/{dataset_name}/autoencoder"
 torch.save(model.state_dict(), f"{path_to_model}/autoencoder_{hidden_dim}dim.pth")
 print(f"Model saved: {path_to_model}/autoencoder_{hidden_dim}dim.pth")
 

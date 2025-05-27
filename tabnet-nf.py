@@ -26,15 +26,17 @@ max_epoch = 50
 nf_train = False
 train_continue = False
 
+base_path = "/mnt/work-qnap/miyauchi"
 model_name = "tabnet-nf"
 dataset_name = "haenkaze"
-feature_path = f'data/{dataset_name}/features/{frequency}'
-anomaly_score_path = f'data/{dataset_name}/anomaly_score/{model_name}'
+feature_path = f"{base_path}/data/{dataset_name}/features/{frequency}"
+anomaly_score_path = f"{base_path}/data/{dataset_name}/anomaly_score/{model_name}"
+
 
 if(frequency=='1S' or 'sampled' in frequency):
-        parquet_file = f'data/{dataset_name}/2023_'+frequency+'_data.parquet'
+        parquet_file = f'{base_path}/data/{dataset_name}/2023_'+frequency+'_data.parquet'
 else:
-    parquet_file = f'data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
+    parquet_file = f'{base_path}/data/{dataset_name}/2023_'+frequency+'_avg_data.parquet'
 
 print(f"Loading data from {parquet_file}...")
 data = pd.read_parquet(parquet_file)
@@ -95,7 +97,7 @@ del feature_train,feature_test
 
 optimizer = torch.optim.Adam(nf_model.parameters(), lr=1e-4)
 
-trained_nf = f"model/haenkaze/{model_name}/nf_{frequency}_{max_epoch}epoch.pth"
+trained_nf = f"{base_path}/model/haenkaze/{model_name}/nf_{frequency}_{max_epoch}epoch.pth"
 if os.path.exists(trained_nf) and (not nf_train):
     print(f"Load from {trained_nf}")
     with open(trained_nf, "rb") as file:
