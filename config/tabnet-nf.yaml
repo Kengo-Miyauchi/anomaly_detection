@@ -1,0 +1,9 @@
+feature_dim: 40
+n_steps : 20
+optimizer_params:
+  lr: 0.001
+batch_size_pre: 4096
+batch_size_tr: 256
+covariance_type: None
+pretraining_ratio: 0.5
+max_epochs: 100

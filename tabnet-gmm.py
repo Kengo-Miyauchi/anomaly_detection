@@ -5,9 +5,10 @@ import os
 import gc
 import pickle
 from sklearn.mixture import GaussianMixture
-from util_module.data_to_plot import plot_by_date,calc_scores
+from util_module.data_to_plot import plot_by_date
+from util_module.calc_scores import calc_scores, calc_scores_with_windowing, calc_scores_windowing_once
 from util_module.end_info import show_info
-from util_module.tabnet.extract_features import data_to_TabNetFeatures
+from util_module.extract_features import data_to_TabNetFeatures
 from util_module.tabnet.build_exec_model import ExecModel
 from util_module.tabnet.set_config import set_config_file
 from util_module import SCADA_utils
@@ -19,7 +20,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # download data
 stampcol = "DateTime"
-frequency = '1S'
+frequency = '10M'
 sequence_length = 10
 threshold_line = 100 - 1
 dataset_name = "haenkaze"
@@ -55,16 +56,15 @@ X_test = X_test.astype(np.float16)
 
 
 # set execute model
-model_name = f"tabnet-self-attn2-{sequence_length}seq"
+model_name = f"tabnet-self-attn-{sequence_length}seq"
 #path_to_pretrained = "model/haenkaze/tabnet-pretrain-out2023-40dim"
-path_to_pretrained = f"{base_path}/model/haenkaze/tabnet-self-attn2-40dim-{sequence_length}seq"
+path_to_pretrained = f"model/haenkaze/tabnet-self-attn-40dim-{sequence_length}seq"
 config = set_config_file()
 exec_model = ExecModel(
     device=device,
     config=config,
     dataset_name=dataset_name,
     model_name=model_name,
-    X_train=X_train,
     path_to_pretrained=path_to_pretrained
 )
 out_dir = exec_model.out_dir
@@ -110,6 +110,7 @@ threshold = np.percentile(log_likelihood,threshold_line)
 #threshold = max(log_likelihood)
 del feature_train
 anomaly_score = -gmm.score_samples(feature_test)
+timestamp = timestamp[:len(anomaly_score)]
 #import pdb; pdb.set_trace()
 df = pd.DataFrame({"DATETIME": timestamp, "AnomalyScore": anomaly_score})
 if(not(pd.api.types.is_datetime64_any_dtype(df['DATETIME']))):
@@ -123,14 +124,13 @@ df = df.drop(remove_indices)
 #df['Date'] = df['DATETIME'].dt.date
 
 #import pdb; pdb.set_trace()
-timestamp = timestamp[:len(anomaly_score)]
 #img_path = out_dir + "/"+frequency+"_gmm_" + str(n_components) + "components.png"
 log_plot = False
 if log_plot:img_path = f"{out_dir}/{frequency}_log.png"
 else:img_path = f"{out_dir}/{frequency}.png"
 plot_by_date(log_plot,anomaly_score,timestamp,train_range,threshold,img_path,event_files)
-print(f"Threshold line: {threshold_line}%")
-calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7)
-print(f"result: {img_path}")
+print(f"Plot result: {img_path}")
 show_info(out_dir,exec_model)
-print(f"Score result: {score_file}")
+#calc_scores(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7)
+#calc_scores_with_windowing(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7, window='10min')
+calc_scores_windowing_once(df, threshold, threshold_line, frequency, [event_files[0]], score_file, before_max=7, window='10min')

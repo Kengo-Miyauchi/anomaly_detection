@@ -40,25 +40,25 @@ class ExecModel:
             self.path_to_pretrained = f'/mnt/iot-qnap5/miyauchi/model/{dataset_name}/{model_name}-{str(self.feature_dim)}dim'
             if self.mask_by_table:
                 self.path_to_pretrained += f"-{self.sequence_length}seq"
-        os.makedirs(self.path_to_pretrained, exist_ok=True)
-        
-        if(os.path.exists(self.path_to_pretrained+"/pretrained.pth")):
-            print(f"Load model from {self.path_to_pretrained}/pretrained.pth")
-            self.unsupervised_model=torch.load(self.path_to_pretrained+"/pretrained.pth",weights_only=False)
+            os.makedirs(self.path_to_pretrained, exist_ok=True)
+
+        if(os.path.exists(f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained.pth")):
+            print(f"Load model from /mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained.pth")
+            self.unsupervised_model=torch.load(f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained.pth",weights_only=False)
             if(self.refit):
-                self.set_log(filepath=self.path_to_pretrained + '/pretraining_refit.log')
+                self.set_log(filepath=f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretraining_refit.log")
                 #self.unsupervised_model=self.set_unsupervised_model()
                 logging.info("Starting TabNet pretraining...")
                 self.fit_model()
                 logging.info("TabNet pretraining finished.")
-                torch.save(self.unsupervised_model, self.path_to_pretrained+"/pretrained_refit.pth")
+                torch.save(self.unsupervised_model, f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained_refit.pth")
         else:
-            self.set_log(filepath=self.path_to_pretrained + '/pretraining.log')
+            self.set_log(filepath=f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretraining.log")
             self.unsupervised_model=self.set_unsupervised_model()
             logging.info("Starting TabNet pretraining...")
             self.fit_model()
             logging.info("TabNet pretraining finished.")
-            torch.save(self.unsupervised_model, self.path_to_pretrained+"/pretrained.pth")
+            torch.save(self.unsupervised_model, f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained.pth")
             # self.unsupervised_model.save_model(path_to_pretrained)
     
     # 事前学習モデルの設定
