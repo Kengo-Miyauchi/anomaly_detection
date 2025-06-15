@@ -1,7 +1,5 @@
 import torch
-import skimage.io as io
 import math
-from PIL import Image
 import pickle
 import json
 import os
@@ -9,95 +7,114 @@ import csv
 import argparse
 from tqdm import tqdm
 import random
-from model import build_clip_model
+import pandas as pd
+from util_module.extract_features import create_dataloader
 
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-def parse(data, part, clip_model, preprocess, image_dpath, out_dpath):
-    if not data:
-        print(f"No {part} data is prepared.")
-        return
-
-    all_names = []
+def parse(data, part, encoder_model, out_dpath, scada_dpath):
     all_embeddings = []
     all_captions = []
-    for i in tqdm(range(len(data))):
-        d = {
-            "clip_embedding": i,
-            "image_id": data[i][0],
-            "image_name": data[i][1],
-            "caption": data[i][2]
-        }
+    
+    for i, item in enumerate(tqdm(data)):
+        file_id = item[0]
+        caption = item[1]
+        time_range = item[2]
+        # SCADAファイル読み込み（./scada/001.csv）
+        scada_path = os.path.join(scada_dpath, f"{file_id}.csv")
+        with open(scada_path, "r") as f:
+            df = pd.read_csv(scada_path, skiprows=1)  # ヘッダー行をスキップ
+            series = df.values
+        
+        embedding_chunks = []
 
-        fpath = os.path.join(image_dpath, d["image_name"])
-        if not os.path.isfile(fpath):
-            raise FileNotFoundError(fpath)
+        for j in range(6):
+            start_index = j * (series.shape[0] // 6)
+            end_index = (j + 1) * (series.shape[0] // 6)
+            chunk_series = series[start_index:end_index]
 
-        image = io.imread(fpath)
-        image = preprocess(Image.fromarray(image)).unsqueeze(0).to(DEVICE)
-        with torch.no_grad():
-            prefix = clip_model.encode_image(image).cpu()
-        all_embeddings.append(prefix)
-        all_captions.append(d)
-        all_names.append(d["image_name"])
+            dataloader = create_dataloader(chunk_series, 32, False)
+            features = []
 
-    out_data = {"clip_embedding": torch.cat(all_embeddings, dim=0), "captions": all_captions}
+            for batch_index, batch in enumerate(dataloader):
+                batch = batch.to(DEVICE)
+                with torch.no_grad():
+                    step_outputs, _ = encoder_model(batch)
+                encoder_out = sum(step for step in step_outputs)
+                encoder_out = encoder_out.detach().cpu()
+                features.append(encoder_out)
+                del step_outputs, batch
+                torch.cuda.empty_cache()
+
+            features = torch.cat(features, dim=0)        # [T, 40]
+            chunk_embedding = features.mean(dim=0)       # [40]
+            embedding_chunks.append(chunk_embedding)     # List[6 x 40]
+            #import pdb; pdb.set_trace()
+
+        # ここで連結 → [240]
+        final_embedding = torch.cat(embedding_chunks).unsqueeze(0)  # [1, 240]
+        all_embeddings.append(final_embedding)
+
+
+        all_captions.append({
+            "scada_embedding": i,
+            "caption": caption,
+            "time_range": time_range,
+        })
+
+    out_data = {
+        "scada_embedding": torch.cat(all_embeddings, dim=0),
+        "captions": all_captions
+    }
+
+    os.makedirs(out_dpath, exist_ok=True)
     data_fpath = os.path.join(out_dpath, f"{part}.pkl")
     pickle.dump(out_data, open(data_fpath, "wb"))
-    json.dump(all_names, open(os.path.join(out_dpath, f"{part}_list.json"), "w"), indent=4)
     print(f"Saved {part} data to {data_fpath}.")
     return data_fpath
 
-def prepare_data(clip_model_name, captions_fpath, image_dpath, test_ratio, valid_ratio, train_ratio, shuffle=False):
-    """
-    [
-        {
-            "caption": ***,
-            "id": ***,
-            "image_name": ***
-        },
-        ...
-    ]
-    """
-    assert sum([test_ratio,valid_ratio,train_ratio]) <= 1.
-    clip_model, preprocess = build_clip_model(clip_model_name)
+def prepare_data(captions_fpath, encoder_model, test_ratio, valid_ratio, train_ratio, shuffle=False, scada_dpath=None):
+    assert sum([test_ratio, valid_ratio, train_ratio]) <= 1.0
 
-    out_dpath = os.path.join(os.path.dirname(captions_fpath), f"processed-{clip_model_name}")
-    if not os.path.exists(out_dpath):
-        os.makedirs(out_dpath)
-
-    all_data = [[i] + line for i, line in enumerate(csv.reader(open(captions_fpath)))]
+    all_data = list(csv.reader(open(captions_fpath)))
+    del all_data[0]  # ヘッダー行を削除
+    
     if shuffle:
-        all_data = random.sample(all_data, len(all_data))
+        random.shuffle(all_data)
 
-    test_size = math.ceil(len(all_data) * test_ratio)
-    valid_size = math.ceil(len(all_data) * valid_ratio)
-    train_size = math.ceil(len(all_data) * train_ratio)
-    print(f"{len(all_data)} captions loaded from json.")
-    print(f"\ttrain size: {train_size}\n\tvalid size: {valid_size}\n\ttest size: {test_size}")
+    total = len(all_data)
+    test_data = all_data[:int(total * test_ratio)]
+    valid_data = all_data[int(total * test_ratio):int(total * (test_ratio + valid_ratio))]
+    train_data = all_data[int(total * (test_ratio + valid_ratio)):int(total * (test_ratio + valid_ratio + train_ratio))]
 
-    test_data_fpath = parse(data=all_data[:test_size], part="test",
-                            image_dpath=image_dpath, out_dpath=out_dpath,
-                            clip_model=clip_model, preprocess=preprocess)
-    valid_data_fpath = parse(data=all_data[test_size:test_size+valid_size], part="valid",
-                             image_dpath=image_dpath, out_dpath=out_dpath,
-                             clip_model=clip_model, preprocess=preprocess)
-    train_data_fpath = parse(data=all_data[test_size+valid_size:test_size+valid_size+train_size], part="train",
-                             image_dpath=image_dpath, out_dpath=out_dpath,
-                             clip_model=clip_model, preprocess=preprocess)
-                             
+    out_dpath = os.path.join(os.path.dirname(captions_fpath), "processed-scada")
+    os.makedirs(out_dpath, exist_ok=True)
+
+    test_data_fpath = parse(test_data, "test", encoder_model, out_dpath, scada_dpath)
+    valid_data_fpath = parse(valid_data, "valid", encoder_model, out_dpath, scada_dpath)
+    train_data_fpath = parse(train_data, "train", encoder_model, out_dpath, scada_dpath)
+
     return test_data_fpath, valid_data_fpath, train_data_fpath
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--clip_model_name", type=str, help="en_clip_b32, ja_clip_b16, ja_cloob_b16")
-    parser.add_argument("--captions_fpath", type=str)
-    parser.add_argument("--image_dpath", type=str)
+    parser.add_argument("--captions_fpath", type=str, required=True, help="CSV path with SCADA file IDs and captions")
+    parser.add_argument("--encoder_model_path", type=str, required=True, help="Path to pretrained TabNet model directory")
+    parser.add_argument("--scada_dpath", type=str, required=True, help="Directory containing SCADA CSV files")
     args = parser.parse_args()
-    coco_test_fpath, coco_valid_fpath, coco_train_fpath = prepare_data(clip_model_name=args.clip_model_name,
-                                                                       captions_fpath=args.captions_fpath,
-                                                                       image_dpath=args.image_dpath,
-                                                                       test_ratio=0.1,
-                                                                       valid_ratio=0.1,
-                                                                       train_ratio=0.8,
-                                                                       shuffle=False)
+
+    # モデルの読み込み
+    path_to_pretrained = args.encoder_model_path
+    unsupervised_model = (torch.load(os.path.join(path_to_pretrained, "pretrained.pth"), weights_only=False))
+    encoder = unsupervised_model.network.encoder
+
+    # 実行
+    prepare_data(
+        captions_fpath=args.captions_fpath,
+        encoder_model=encoder,
+        test_ratio=0.1,
+        valid_ratio=0.1,
+        train_ratio=0.8,
+        shuffle=True,
+        scada_dpath=args.scada_dpath
+    )

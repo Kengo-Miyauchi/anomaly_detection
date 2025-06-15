@@ -1,180 +1,225 @@
-import torch
-from torch.nn import functional as nnf
-from torch.utils.data import Dataset, DataLoader
-from transformers import (
-    AdamW,
-    get_linear_schedule_with_warmup
-)
+# -*- coding: utf-8 -*-
+"""
+train.py – SCADA × GPT キャプション生成の学習スクリプト
+===================================================
+* 事前に preprocess.py で作った
+    └ datasets_dpath/<dataset_name>/processed-scada/{train,valid}.pkl
+  を読み込み、CaptionModel を学習する。
+"""
+import os
+import sys
+import json
 import warnings
 import argparse
-import sys
-import os
-import json
 from tqdm import tqdm
 
-from model import ClipDataset, build_cap_model
+import torch
+from torch.nn import functional as F
+from torch.utils.data import DataLoader
+from transformers import AdamW, get_linear_schedule_with_warmup
 
-def set_default_args_to_parser(parser: argparse.ArgumentParser):
-    parser.add_argument('--train_name_prefix', type=None, help='prefix for saved filenames')
-    parser.add_argument('--dataset_name', type=str, help='preprocessed dataset')
-    parser.add_argument('--rinna_gpt_name', type=str, default='gpt_medium', help='gpt_medium/gpt_1b')
-    parser.add_argument('--clip_model_name', type=str, default='en_clip_b32', help='model name for clip')
-    parser.add_argument('--pretrained_path', type=str, default=None)
-    # parser.add_argument('--train_data_fpath', type=str)
-    # parser.add_argument('--valid_data_fpath', type=str)
-    parser.add_argument('--datasets_dpath', default='./data')
-    parser.add_argument('--checkpoints_dpath', default='./checkpoints')
-    parser.add_argument('--epochs', type=int, default=10)
-    parser.add_argument('--per_gpu_train_batch_size', type=int, default=4)
-    parser.add_argument('--per_gpu_eval_batch_size', type=int, default=4)
-    parser.add_argument('--lr', type=float, default=2e-5)
-    parser.add_argument('--warmup_steps', type=int, default=5000)
-    parser.add_argument('--save_every', type=int, default=0)
-    parser.add_argument('--mapping_type', type=str, default='transformer', help='mlp/transformer')
-    parser.add_argument('--prefix_length', type=int, default=10)
-    parser.add_argument('--prefix_length_clip', type=int, default=10)
-    parser.add_argument('--only_prefix', dest='only_prefix', action='store_true')
-    parser.add_argument('--num_layers', type=int, default=8, help="number of transformer layers")
-    parser.set_defaults(prefix_dim=512) # CLIP
-    parser.add_argument('--n_gpu', type=int, default=1)
+# ===== 新しい model.py から読み込み =====
+from model import SCADADataset, build_caption_model
 
-def make_train_name(args: argparse.Namespace):
+# ---------------------------------------------------------------------
+# 1. 引数定義
+# ---------------------------------------------------------------------
+def set_default_args(parser: argparse.ArgumentParser):
+    # データセット／出力
+    parser.add_argument("--train_name_prefix", type=str, default=None)
+    parser.add_argument("--dataset_name", type=str, required=True)          # 例: scada_coco
+    parser.add_argument("--datasets_dpath", type=str, default="./data")     # pkl 群のルート
+    parser.add_argument("--checkpoints_dpath", type=str, default="./checkpoints")  # 学習済みモデルの保存先
+
+    # GPT バリアント
+    parser.add_argument("--rinna_gpt_name", type=str, default="gpt_medium", choices=["gpt_medium", "gpt_1b"])
+
+    # モデル・学習設定
+    parser.add_argument("--prefix_length", type=int, default=10)
+    parser.add_argument("--prefix_dim", type=int, default=512)
+    parser.add_argument("--mapping_type", type=str, default="transformer", choices=["mlp", "transformer"])
+    parser.add_argument("--num_layers", type=int, default=4)                # TransformerMapper 用
+    parser.add_argument("--only_prefix", action="store_true")               # GPT 本体を凍結
+
+    # 事前学習重み
+    parser.add_argument("--pretrained_path", type=str, default=None)
+
+    # 训练ハイパーパラメータ
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--per_gpu_train_batch_size", type=int, default=4)
+    parser.add_argument("--per_gpu_eval_batch_size", type=int, default=4)
+    parser.add_argument("--lr", type=float, default=2e-5)
+    parser.add_argument("--warmup_steps", type=int, default=5000)
+    parser.add_argument("--save_every", type=int, default=0)
+
+    # GPU
+    parser.add_argument("--n_gpu", type=int, default=1)
+
+# ---------------------------------------------------------------------
+# 2. 補助関数
+# ---------------------------------------------------------------------
+def make_train_name(args: argparse.Namespace) -> str:
     elems = []
     if args.train_name_prefix:
         elems.append(args.train_name_prefix)
-    elems += [args.dataset_name,
-              args.rinna_gpt_name,
-              args.clip_model_name,
-              args.mapping_type,
-              "prefix" if args.only_prefix else "finetune",
-              f"ep{args.epochs}",
-              f"bs{args.train_batch_size}",
-              f"lr{args.lr}"]
+    elems.extend(
+        [
+            args.dataset_name,
+            args.rinna_gpt_name,
+            args.mapping_type,
+            "prefix" if args.only_prefix else "finetune",
+            f"ep{args.epochs}",
+            f"bs{args.train_batch_size}",
+            f"lr{args.lr}",
+        ]
+    )
     return "-".join(elems)
 
-def save_config(args: argparse.Namespace, output_dir: str):
-    out_path = os.path.join(output_dir, "args.json")
-    with open(out_path, 'w') as outfile:
-        json.dump(vars(args), outfile, indent=4)
 
-def train(args):
+def save_config(args: argparse.Namespace, out_dir: str):
+    with open(os.path.join(out_dir, "args.json"), "w") as f:
+        json.dump(vars(args), f, indent=4)
+
+# ---------------------------------------------------------------------
+# 3. メイン学習ループ
+# ---------------------------------------------------------------------
+def train(args: argparse.Namespace):
+    # ---- デバイス設定 ----
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    device_count = torch.cuda.device_count()
-    if device_count < args.n_gpu:
-        warnings.wart(f"n_gpu is set to {device_count} because "
-                      f"the specified number of GPUs {args.n_gpu} is not available")
-        args.n_gpu = device_count
+    avail_gpu = torch.cuda.device_count()
+    if avail_gpu < args.n_gpu:
+        warnings.warn(f"Only {avail_gpu} GPU(s) available → n_gpu={avail_gpu}")
+        args.n_gpu = avail_gpu
 
     args.train_batch_size = args.per_gpu_train_batch_size * max(1, args.n_gpu)
     args.eval_batch_size = args.per_gpu_eval_batch_size * max(1, args.n_gpu)
-    print(f"Number of GPU: {args.n_gpu}")
-    print(f"Total train batch size: {args.train_batch_size}")
 
+    print(f"[INFO] #GPUs: {args.n_gpu}  |  train BS (total): {args.train_batch_size}")
+
+    # ---- データパス ----
+    pkl_dir = os.path.join(args.datasets_dpath,"processed-scada")
+    train_pkl = os.path.join(pkl_dir, "train.pkl")
+    valid_pkl = os.path.join(pkl_dir, "valid.pkl")
+
+    # ---- 出力ディレクトリ ----
     train_name = make_train_name(args)
-    print(f"Train name: {train_name}")
+    out_dir = os.path.join(args.checkpoints_dpath, train_name)
+    os.makedirs(out_dir, exist_ok=True)
+    save_config(args, out_dir)
 
-    dataset_dir = os.path.join(args.datasets_dpath, args.dataset_name, f"processed-{args.clip_model_name}")
-    args.train_data_fpath = os.path.join(dataset_dir, "train.pkl")
-    args.valid_data_fpath = os.path.join(dataset_dir, "valid.pkl")
+    # ---- Dataset / DataLoader ----
+    train_ds = SCADADataset(train_pkl, prefix_length=args.prefix_length)
+    valid_ds = SCADADataset(valid_pkl, prefix_length=args.prefix_length)
+    train_dl = DataLoader(train_ds, batch_size=args.train_batch_size, shuffle=True, drop_last=True)
+    valid_dl = DataLoader(valid_ds, batch_size=args.eval_batch_size, shuffle=False, drop_last=False)
 
-    output_dir = os.path.join(args.checkpoints_dpath, train_name)
-    os.makedirs(output_dir, exist_ok=True)
-    save_config(args, output_dir=output_dir)
+    # ---- モデル ----
+    model = build_caption_model(
+        gpt_variant=args.rinna_gpt_name,
+        prefix_length=args.prefix_length,
+        prefix_dim=args.prefix_dim,
+        mapping_type=args.mapping_type,
+        num_layers=args.num_layers,
+        only_prefix=args.only_prefix,
+        pretrained_path=args.pretrained_path,
+    ).to(device)
 
-    train_dataset = ClipDataset(args.train_data_fpath, args.prefix_length)
-    valid_dataset = ClipDataset(args.valid_data_fpath, args.prefix_length)
-    train_dataloader = DataLoader(train_dataset, batch_size=args.train_batch_size, shuffle=True, drop_last=True)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=args.eval_batch_size, shuffle=True, drop_last=True)
-
-    
-    model, tokenizer = build_cap_model(rinna_gpt_name=args.rinna_gpt_name,
-                                       clip_model_name=args.clip_model_name,
-                                       prefix_length=args.prefix_length,
-                                       prefix_length_clip=args.prefix_length_clip,
-                                       prefix_dim=args.prefix_dim,
-                                       num_layers=args.num_layers,
-                                       mapping_type=args.mapping_type,
-                                       only_prefix=args.only_prefix,
-                                       pretrained_path=args.pretrained_path)
-    model = model.to(device)
-    optimizer = AdamW(model.parameters(), lr=args.lr)
-    scheduler = get_linear_schedule_with_warmup(
-        optimizer, num_warmup_steps=args.warmup_steps, num_training_steps=args.epochs * len(train_dataloader)
-    )
-
+    # DataParallel
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
+
+    # ---- Optimizer / Scheduler ----
+    optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
+    scheduler = get_linear_schedule_with_warmup(
+        optimizer,
+        num_warmup_steps=args.warmup_steps,
+        num_training_steps=len(train_dl) * args.epochs,
+    )
+
+    # ---------------------------------------------------------------
+    # 4. Epoch ループ
+    # ---------------------------------------------------------------
     log = []
-    
     for epoch in range(args.epochs):
-        print(f">>> Epoch: {epoch}")
-
-        sys.stdout.flush()
-        progress = tqdm(total=len(train_dataloader), desc=f"Training...")
+        print(f"\n===== Epoch {epoch} / {args.epochs} =====")
+        # ----- Train -----
         model.train()
-        losses = []
-        epoch_log = {"epoch": epoch}
-        for idx, (tokens, mask, prefix, _) in enumerate(train_dataloader):
+        train_losses = []
+        pbar = tqdm(train_dl, desc="Train")
+        for tokens, mask, prefix, _, _ in pbar:
+            tokens, mask, prefix = (
+                tokens.to(device),
+                mask.to(device),
+                prefix.to(device, dtype=torch.float32),
+            )
+
             model.zero_grad()
-            tokens, mask, prefix = tokens.to(device), mask.to(device), prefix.to(device, dtype=torch.float32)
-            outputs = model(tokens, prefix, mask)
-            logits = outputs.logits[:, train_dataset.prefix_length - 1: -1]
-            loss = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), tokens.flatten(), ignore_index=0)
-
+            outputs = model(tokens=tokens, prefix=prefix, mask=mask)
+            # logits : [B, P+T, V] → caption 部だけ
+            logits = outputs.logits[:, train_ds.prefix_length - 1 : -1]
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                tokens.flatten(),
+                ignore_index=0,
+            )
             if args.n_gpu > 1:
-                loss = loss.mean()  # mean() to average on multi-gpu parallel training
-
+                loss = loss.mean()
             loss.backward()
             optimizer.step()
             scheduler.step()
-            optimizer.zero_grad()
-            progress.set_postfix({"loss": loss.item()})
-            losses.append(loss.item())
-            progress.update()
-            if (idx + 1) % 10000 == 0:
-                torch.save(
-                    model.state_dict(),
-                    os.path.join(output_dir, f"latest.pt"),
-                )
-        progress.close()
-        print(f"Training avg loss: {sum(losses)/len(losses)}")
-        epoch_log["train_avg_loss"] = sum(losses)/len(losses)
 
-        sys.stdout.flush()
-        progress = tqdm(total=len(valid_dataloader), desc=f"Evaluating...")
+            train_losses.append(loss.item())
+            pbar.set_postfix(loss=f"{loss.item():.4f}")
+
+        avg_train = sum(train_losses) / len(train_losses)
+        print(f"[Epoch {epoch}] Train Loss: {avg_train:.4f}")
+
+        # ----- Validation -----
         model.eval()
-        losses = []
-        for idx, (tokens, mask, prefix, _) in enumerate(valid_dataloader):
-            tokens, mask, prefix = tokens.to(device), mask.to(device), prefix.to(device, dtype=torch.float32)
-            with torch.no_grad():
-                outputs = model(tokens, prefix, mask)
-            logits = outputs.logits[:, valid_dataset.prefix_length - 1: -1]
-            loss = nnf.cross_entropy(logits.reshape(-1, logits.shape[-1]), tokens.flatten(), ignore_index=0)
-            if args.n_gpu > 1:
-                loss = loss.mean()
-            progress.set_postfix({"loss": loss.item()})
-            losses.append(loss.item())
-            progress.update()
-        progress.close()
-        print(f"Validation avg loss: {sum(losses)/len(losses)}")
-        epoch_log["valid_avg_loss"] = sum(losses)/len(losses)
+        val_losses = []
+        pbar = tqdm(valid_dl, desc="Valid")
+        with torch.no_grad():
+            for tokens, mask, prefix, _, _ in pbar:
+                tokens, mask, prefix = (
+                    tokens.to(device),
+                    mask.to(device),
+                    prefix.to(device, dtype=torch.float32),
+                )
+                outputs = model(tokens=tokens, prefix=prefix, mask=mask)
+                logits = outputs.logits[:, valid_ds.prefix_length - 1 : -1]
+                loss = F.cross_entropy(
+                    logits.reshape(-1, logits.size(-1)),
+                    tokens.flatten(),
+                    ignore_index=0,
+                )
+                if args.n_gpu > 1:
+                    loss = loss.mean()
+                val_losses.append(loss.item())
+                pbar.set_postfix(loss=f"{loss.item():.4f}")
 
-        if (args.save_every > 0) and ((epoch+1) % args.save_every == 0 or (epoch+1) == args.epochs):
-            torch.save(
-                model.state_dict(),
-                os.path.join(output_dir, f"{epoch:03d}.pt"),
-            )
-        log.append(epoch_log)
-        json.dump(log, open(os.path.join(output_dir, "log.json"), "w"), indent=4)
-    if log:
-        best_epoch = sorted(log, key = lambda x: x["valid_avg_loss"])[0]["epoch"]
-        best_pt_fpath = os.path.join(output_dir, f"{best_epoch:03d}.pt")
-    else:
-        best_pt_fpath = None
-    return output_dir, best_pt_fpath
+        avg_val = sum(val_losses) / len(val_losses)
+        print(f"[Epoch {epoch}] Valid Loss: {avg_val:.4f}")
+
+        # ----- Checkpoint -----
+        if args.save_every == 0 or (epoch + 1) % args.save_every == 0 or (epoch + 1) == args.epochs:
+            ckpt_path = os.path.join(out_dir, f"{epoch:03d}.pt")
+            torch.save(model.state_dict(), ckpt_path)
+            print(f"[INFO] saved checkpoint → {ckpt_path}")
+
+        log.append({"epoch": epoch, "train_loss": avg_train, "valid_loss": avg_val})
+        json.dump(log, open(os.path.join(out_dir, "log.json"), "w"), indent=4)
+
+    # best checkpoint
+    best_ep = min(log, key=lambda x: x["valid_loss"])["epoch"]
+    print(f"Best epoch: {best_ep}")
+    return out_dir, os.path.join(out_dir, f"{best_ep:03d}.pt")
 
 
-if __name__ == '__main__':
+# ---------------------------------------------------------------------
+# 5. エントリポイント
+# ---------------------------------------------------------------------
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    set_default_args_to_parser(parser=parser)
-    train(args = parser.parse_args())
+    set_default_args(parser)
+    args = parser.parse_args()
+    train(args)
