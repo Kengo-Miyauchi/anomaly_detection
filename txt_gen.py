@@ -15,11 +15,14 @@ stampcol = "DateTime"
 dataset_name = "haenkaze"
 year = "2023"
 data_path = "/mnt/iot-qnap5/miyauchi"
-data_dir = f'{data_path}/data/{dataset_name}/{year}/1s_data'
-result_file = f'{data_path}/data/paired_txt.csv'
-paired_df_dir = f'{data_path}/data/paired_df'
+data_dir = f'{data_path}/data/{dataset_name}/2023/1s_data'
+topk = 1
+if topk > 1:
+    result_file = f'{data_path}/data/paired_txt_top{topk}.csv'
+else:
+    result_file = f'{data_path}/data/paired_txt.csv'
+paired_df_dir = f'{data_path}/data/paired_data'
 
-# 保存ディレクトリがなければ作成
 os.makedirs(paired_df_dir, exist_ok=True)
 
 # load files
@@ -49,9 +52,9 @@ with open(result_file, 'w', newline='', encoding='utf-8') as f:
         print(f"{file_idx+1}/{len(file_list)} processing... {file_path}")
 
         df[stampcol] = pd.to_datetime(df[stampcol])
-        SCADA_utils.fix_data(df)
-        df.fillna(method="ffill", inplace=True)
-        SCADA_utils.arrange_data(df, stampcol)
+        df=SCADA_utils.fix_data(df)
+        #df.fillna(method="ffill", inplace=True)
+        df=SCADA_utils.arrange_data(df, stampcol)
 
         start_time = df[stampcol].min().replace(minute=0, second=0)
         end_time = df[stampcol].max()
@@ -60,14 +63,14 @@ with open(result_file, 'w', newline='', encoding='utf-8') as f:
         while start_time + timedelta(hours=1) <= end_time:
             end_hour = start_time + timedelta(hours=1)
             df_hour = SCADA_utils.extract_specific_terms(df, start_time, end_hour, stampcol)
+            df_hour = df_hour.drop(columns=['DateTime', ' 日付ﾌｫｰﾏｯﾄ 時分秒'], errors='ignore')
 
             if df_hour.empty:
                 start_time = end_hour
                 i += 1
                 continue
 
-            relative_changes = {}
-            directions = {}
+            changes = []
 
             for col in df_hour.columns:
                 if col == stampcol:
@@ -82,24 +85,28 @@ with open(result_file, 'w', newline='', encoding='utf-8') as f:
                     continue
                 delta = end_val - start_val
                 rel_change = delta / mean_val
-                relative_changes[col] = abs(rel_change)
-                directions[col] = "増加" if rel_change > 0 else "減少"
+                abs_change = abs(rel_change)
+                direction = "増加" if rel_change > 0 else "減少"
+                changes.append((col, abs_change, direction))
 
-            if not relative_changes:
+            if not changes:
                 start_time = end_hour
                 i += 1
                 continue
 
-            most_changed_attr = max(relative_changes, key=relative_changes.get)
-            direction_text = directions[most_changed_attr]
+            # Top k
+            changes_sorted = sorted(changes, key=lambda x: x[1], reverse=True)[:topk]
+            description_parts = [f"{col}が大きく{direction}" for col, _, direction in changes_sorted]
+
             hour_str = f"{start_time.strftime('%H:%M')}~{end_hour.strftime('%H:%M')}"
             date_id = f"{start_time.strftime('%y-%m-%d')}-{i}"
-            text = f"{hour_str}で{most_changed_attr}の値が大きく{direction_text}した"
+            text = "、".join(description_parts) + "した"
+            text = text.replace(" ", "")
 
-            # テキスト出力
+            # テキスト保存
             writer.writerow([date_id, text])
 
-            # df_hourの保存
+            # df_hour保存
             df_hour_path = os.path.join(paired_df_dir, f"{date_id}.csv")
             df_hour.to_csv(df_hour_path, index=False, encoding='utf-8')
 
