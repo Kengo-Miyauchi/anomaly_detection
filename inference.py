@@ -100,7 +100,7 @@ class Predictor:
     # --------------------------------------------------------------
     # 1-2. パブリック API
     # --------------------------------------------------------------
-    def caption(self, csv_path: str, time_range: str = None, beam_size: int = 5, max_len: int = 64, temperature: float = 1.0):
+    def caption(self, csv_path: str, time_range: str = None, beam_size: int = 5, max_len: int = 64, temperature: float = 1.0, no_repeat_ngram_size: int = 3):
         prefix_vec = self._encode_scada(csv_path)                          # [1,prefix_dim]
         if time_range is not None:
             prompt = f"{time_range}のデータに基づいて: "
@@ -116,13 +116,14 @@ class Predictor:
             prompt=prompt,
             entry_length=max_len,
             temperature=temperature,
+            no_repeat_ngram_size=no_repeat_ngram_size,
         )
-        return captions[0]  # 最高スコア 1 件を返す
+        return captions  # 最高スコア 1 件を返す
 
     # --------------------------------------------------------------
     # 1-3. ビームサーチ (ClipCap 実装を踏襲)
     # --------------------------------------------------------------
-    def _generate_beam(self, embed, beam_size, prompt=None, entry_length=67, temperature=1.0):
+    def _generate_beam(self, embed, beam_size, prompt=None, entry_length=64, temperature=1.0, no_repeat_ngram_size=3):
         stop_idx = self.tokenizer.encode(self.stop_token)[0]
         device = self.device
 
@@ -136,24 +137,35 @@ class Predictor:
             prefix_embed = embed  # [1, P, E]
             generated = torch.cat((prefix_embed, prompt_embed), dim=1)  # [1, P+T, E]
 
-            # --- tokens（prefix部をダミーで埋める）---
             dummy_prefix_tokens = torch.zeros(1, self.cap_model.prefix_length, dtype=torch.long, device=device)
             tokens = torch.cat((dummy_prefix_tokens, prompt_tokens), dim=1)  # [1, P+T]
         else:
             generated = embed  # [1, P, E]
             tokens = torch.zeros(1, self.cap_model.prefix_length, dtype=torch.long, device=device)  # [1, P]
 
-        # Expand for beam size
         generated = generated.expand(beam_size, *generated.shape[1:])
         tokens = tokens.expand(beam_size, *tokens.shape[1:])
-
 
         for _ in range(entry_length):
             outputs = self.cap_model.gpt(inputs_embeds=generated)
             logits = outputs.logits[:, -1, :] / (temperature if temperature > 0 else 1.0)
-            logits = logits.softmax(-1).log()
+            logits = logits.softmax(-1).log()  # shape: [beam_size, vocab_size]
 
-            # 1ステップ目（最初のトークン予測）
+            # 🔽 no_repeat_ngram_size 対応
+            if no_repeat_ngram_size is not None and tokens.size(1) >= no_repeat_ngram_size:
+                for beam_idx in range(beam_size):
+                    prev_tokens = tokens[beam_idx].tolist()
+                    ngram_dict = {}
+                    for i in range(len(prev_tokens) - no_repeat_ngram_size + 1):
+                        prefix = tuple(prev_tokens[i : i + no_repeat_ngram_size - 1])
+                        next_token = prev_tokens[i + no_repeat_ngram_size - 1]
+                        ngram_dict.setdefault(prefix, set()).add(next_token)
+
+                    current_prefix = tuple(prev_tokens[-(no_repeat_ngram_size - 1):])
+                    blocked = ngram_dict.get(current_prefix, set())
+                    for token_id in blocked:
+                        logits[beam_idx, token_id] = -float("inf")
+
             if scores is None:
                 logits = logits[0]                           # shape: [vocab_size]
                 scores, next_tok = logits.topk(beam_size)    # shape: [beam_size]
@@ -181,19 +193,9 @@ class Predictor:
                 tok_embed = tok_embed.unsqueeze(1)                                   # [B, 1, E]
                 generated = torch.cat([generated, tok_embed], dim=1)                 # [B, T+1, E]
 
-
-                # next_tok: shape should be [beam_size, 1]
-                if next_tok.dim() > 1:
-                    next_tok_squeezed = next_tok.squeeze(1)
-                else:
-                    next_tok_squeezed = next_tok  # already squeezed
-
-                # 比較：eq → shape [beam_size]
+                next_tok_squeezed = next_tok.squeeze(1) if next_tok.dim() > 1 else next_tok
                 stop_flags = next_tok_squeezed.eq(stop_idx)
-
-                # 論理和（is_stop: [beam_size]）
                 is_stop = is_stop | stop_flags
-
 
             if is_stop.all():
                 break
@@ -203,6 +205,7 @@ class Predictor:
         decoded = [self.tokenizer.decode(o[: int(l)]) for o, l in zip(outputs, seq_len)]
         order = scores.argsort(descending=True)
         return [decoded[i] for i in order]
+
 
 
 # ----------------------------------------------------------------------
@@ -252,8 +255,12 @@ def main():
     caption = predictor.caption(
         csv_path=args.scada_csv,
         beam_size=args.beam_size,
+        temperature=0.5,
+        max_len=16,
+        no_repeat_ngram_size=4,
     )
-    print("Generated caption:", caption)
+    for i in range(len(caption)):
+        print(f"Generated caption {i}:{caption[i]}")
 
 
 if __name__ == "__main__":
