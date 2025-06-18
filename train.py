@@ -141,12 +141,12 @@ def train(args: argparse.Namespace):
     # ---------------------------------------------------------------
     log = []
     for epoch in range(args.epochs):
-        print(f"\n===== Epoch {epoch} / {args.epochs} =====")
+        print(f"\n===== Epoch {epoch+1} / {args.epochs} =====")
         # ----- Train -----
         model.train()
         train_losses = []
         pbar = tqdm(train_dl, desc="Train")
-        for tokens, mask, prefix, _, _ in pbar:
+        for tokens, mask, prefix, _, in pbar:
             tokens, mask, prefix = (
                 tokens.to(device),
                 mask.to(device),
@@ -172,14 +172,14 @@ def train(args: argparse.Namespace):
             pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         avg_train = sum(train_losses) / len(train_losses)
-        print(f"[Epoch {epoch}] Train Loss: {avg_train:.4f}")
+        print(f"[Epoch {epoch+1}] Train Loss: {avg_train:.4f}")
 
         # ----- Validation -----
         model.eval()
         val_losses = []
         pbar = tqdm(valid_dl, desc="Valid")
         with torch.no_grad():
-            for tokens, mask, prefix, _, _ in pbar:
+            for tokens, mask, prefix, _ in pbar:
                 tokens, mask, prefix = (
                     tokens.to(device),
                     mask.to(device),
@@ -198,11 +198,11 @@ def train(args: argparse.Namespace):
                 pbar.set_postfix(loss=f"{loss.item():.4f}")
 
         avg_val = sum(val_losses) / len(val_losses)
-        print(f"[Epoch {epoch}] Valid Loss: {avg_val:.4f}")
+        print(f"[Epoch {epoch+1}] Valid Loss: {avg_val:.4f}")
 
         # ----- Checkpoint -----
         if args.save_every == 0 or (epoch + 1) % args.save_every == 0 or (epoch + 1) == args.epochs:
-            ckpt_path = os.path.join(out_dir, f"{epoch:03d}.pt")
+            ckpt_path = os.path.join(out_dir, f"{epoch+1:03d}.pt")
             torch.save(model.state_dict(), ckpt_path)
             print(f"[INFO] saved checkpoint → {ckpt_path}")
 

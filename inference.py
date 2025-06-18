@@ -24,10 +24,9 @@ DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # ----------------------------------------------------------------------
 def load_tabnet_encoder(ckpt_path: str):
     """
-    ckpt に保存された `unsupervised_model` から encoder を取り出す想定。
+    checkpoint に保存された `unsupervised_model` から encoder を取り出す想定。
     """
-    full_model = torch.load(ckpt_path, map_location=DEVICE)
-    # 多くの場合 `unsupervised_model` という属性名で保存されている
+    full_model = torch.load(ckpt_path, map_location=DEVICE, weights_only=False)
     encoder = (
         full_model.network.encoder
         if hasattr(full_model, "network")
@@ -67,27 +66,41 @@ class Predictor:
         from util_module.extract_features import create_dataloader
 
         df = pd.read_csv(csv_path, skiprows=1)
-        series = df.values  # [T,D]
+        series = df.values  # [T, D]
 
-        dataloader = create_dataloader(series, batch_size=128, need_shuffle=False)
+        chunk_embeddings = []
 
-        features = []
-        for batch in dataloader:
-            batch = batch.to(DEVICE)
-            with torch.no_grad():
-                step_outputs, _ = self.encoder(batch)
-            encoder_out = sum(step for step in step_outputs).cpu()
-            features.append(encoder_out)
+        for j in range(6):  # 10分ずつ6分割
+            start = j * (series.shape[0] // 6)
+            end = (j + 1) * (series.shape[0] // 6)
+            chunk = series[start:end]
 
-        embedding = torch.cat(features).mean(dim=0, keepdim=True)  # [1,D]
-        return embedding.to(self.device, dtype=torch.float32)      # 最後にGPUへ
+            dataloader = create_dataloader(chunk, batch_size=128, need_shuffle=False)
+            features = []
+
+            for batch in dataloader:
+                batch = batch.to(self.device)
+                with torch.no_grad():
+                    step_outputs, _ = self.encoder(batch)
+                encoder_out = sum(step for step in step_outputs).cpu()
+                features.append(encoder_out)
+
+            if len(features) == 0:
+                continue
+
+            chunk_feature = torch.cat(features).mean(dim=0)  # [40]
+            chunk_embeddings.append(chunk_feature)
+
+        final_embedding = torch.cat(chunk_embeddings).unsqueeze(0)  # [1, 240]
+        return final_embedding.to(self.device)
+
 
 
 
     # --------------------------------------------------------------
     # 1-2. パブリック API
     # --------------------------------------------------------------
-    def caption(self, csv_path: str, time_range: str, beam_size: int = 5, max_len: int = 64, temperature: float = 1.0):
+    def caption(self, csv_path: str, time_range: str = None, beam_size: int = 5, max_len: int = 64, temperature: float = 1.0):
         prefix_vec = self._encode_scada(csv_path)                          # [1,prefix_dim]
         if time_range is not None:
             prompt = f"{time_range}のデータに基づいて: "
@@ -238,7 +251,6 @@ def main():
     predictor = Predictor(cap_model, tokenizer, tabnet_encoder, device=DEVICE)
     caption = predictor.caption(
         csv_path=args.scada_csv,
-        time_range=args.time_range,
         beam_size=args.beam_size,
     )
     print("Generated caption:", caption)

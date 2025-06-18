@@ -19,7 +19,7 @@ def parse(data, part, encoder_model, out_dpath, scada_dpath):
     for i, item in enumerate(tqdm(data)):
         file_id = item[0]
         caption = item[1]
-        time_range = item[2]
+        #time_range = item[2]
         # SCADAファイル読み込み（./scada/001.csv）
         scada_path = os.path.join(scada_dpath, f"{file_id}.csv")
         with open(scada_path, "r") as f:
@@ -59,7 +59,7 @@ def parse(data, part, encoder_model, out_dpath, scada_dpath):
         all_captions.append({
             "scada_embedding": i,
             "caption": caption,
-            "time_range": time_range,
+            #"time_range": time_range,
         })
 
     out_data = {

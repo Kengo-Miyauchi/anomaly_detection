@@ -58,7 +58,7 @@ class SCADADataset(Dataset):
         self.prefixes = packed["scada_embedding"]              # Tensor[N, prefix_dim]
         captions_raw = packed["captions"]                      # List[dict]
         self.captions = [c["caption"] for c in captions_raw]
-        self.time_ranges = [c["time_range"] for c in captions_raw]
+        #self.time_ranges = [c["time_range"] for c in captions_raw]
         
         # --- トークン化 & 事前パディング情報 ---
         self.caption_tokens = []
@@ -81,8 +81,8 @@ class SCADADataset(Dataset):
     def __getitem__(self, idx: int):
         tokens, mask = self._pad_tokens(idx)
         prefix_vec = self.prefixes[self.id2vec[idx]]
-        time_range = self.time_ranges[idx]
-        return tokens, mask, prefix_vec, self.captions[idx], time_range
+        #time_range = self.time_ranges[idx]
+        return tokens, mask, prefix_vec, self.captions[idx]
 
     # -------- 内部 util --------
     def _pad_tokens(self, idx: int):
