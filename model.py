@@ -36,7 +36,7 @@ class SCADADataset(Dataset):
     """
     train.pkl / valid.pkl などから
       - tokens:       [seq_len]
-      - mask:         [prefix_len + seq_len]
+      - mask:         [prefix_len + prompt_len + seq_len]
       - prefix:       [prefix_dim]   (SCADA 埋め込みベクトル)
       - caption_str:  str            (デバッグ用・任意)
     を返す。
@@ -45,12 +45,14 @@ class SCADADataset(Dataset):
         self,
         data_path: str,
         prefix_length: int,
+        prompt_length: int = 0,
         gpt_model_name: str = "rinna/japanese-gpt2-medium",
     ):
         self.tokenizer = T5Tokenizer.from_pretrained(gpt_model_name)
         self.tokenizer.pad_token = self.tokenizer.eos_token  # GPT系はpad_tokenが未定義なので明示
-        
+
         self.prefix_length = prefix_length
+        self.prompt_length = prompt_length
 
         with open(data_path, "rb") as f:
             packed = pickle.load(f)
@@ -59,7 +61,15 @@ class SCADADataset(Dataset):
         captions_raw = packed["captions"]                      # List[dict]
         self.captions = [c["caption"] for c in captions_raw]
         #self.time_ranges = [c["time_range"] for c in captions_raw]
-        
+
+        # ここでprompt_tokensを用意（例：固定プロンプトや属性語句からトークン化して保存済みのはず）
+        # もしpackedに 'prompt_tokens' などなければ後で別実装が必要
+        # ここでは空のprompt_tokensを返す想定（要適宜修正）
+        self.prompt_token_list = []
+        for c in captions_raw:
+            # 例: c["prompt"] があれば tokenizer.encode して保存するなど
+            self.prompt_token_list.append(torch.tensor([], dtype=torch.long))
+
         # --- トークン化 & 事前パディング情報 ---
         self.caption_tokens = []
         self.id2vec = []                                       # index → prefix row id
@@ -81,8 +91,8 @@ class SCADADataset(Dataset):
     def __getitem__(self, idx: int):
         tokens, mask = self._pad_tokens(idx)
         prefix_vec = self.prefixes[self.id2vec[idx]]
-        #time_range = self.time_ranges[idx]
-        return tokens, mask, prefix_vec, self.captions[idx]
+        prompt_tokens = self.prompt_token_list[idx]
+        return tokens, mask, prefix_vec, prompt_tokens, self.captions[idx]
 
     # -------- 内部 util --------
     def _pad_tokens(self, idx: int):
@@ -97,6 +107,9 @@ class SCADADataset(Dataset):
         mask = tokens.ge(0)          # valid → 1, pad → 0
         tokens = tokens.masked_fill(~mask, 0)
         mask = mask.float()
+        # prefix + prompt + text の長さのマスクを作るためには
+        # prompt_lengthが固定長ならその分だけ1にする必要あり（要train.pyで対応）
+        # ここではmaskにprompt_length分を1で埋める処理はしない想定（train.pyで追加してください）
         mask = torch.cat([torch.ones(self.prefix_length), mask])
         return tokens, mask
 
@@ -211,11 +224,12 @@ class TransformerMapper(nn.Module):
 
 
 # ---------------------------------------------------------------------
-# 3. GPT2 + Prefix モデル
+# 3. GPT2 + Prefix + Prompt モデル
 # ---------------------------------------------------------------------
 class CaptionModel(nn.Module):
     """
     * `prefix` (TabNet などの SCADA 埋め込みベクトル)
+    * `prompt_tokens` (トークンID列, 形は [B, prompt_length])
     * `tokens` (T5Tokenizer でエンコードしたキャプション)
     を入力し、Cross-Entropy Loss を返す (train) / logits を返す (eval)。
     """
@@ -223,6 +237,7 @@ class CaptionModel(nn.Module):
     def __init__(
         self,
         prefix_length: int,
+        prompt_length: int = 0,
         prefix_dim: int = 512,
         mapping_type: str = "mlp",          # "mlp" | "transformer"
         num_layers: int = 4,                # TransformerMapper 用
@@ -230,6 +245,7 @@ class CaptionModel(nn.Module):
     ):
         super().__init__()
         self.prefix_length = prefix_length
+        self.prompt_length = prompt_length
         self.gpt = AutoModelForCausalLM.from_pretrained(gpt_name)
         embed_dim = self.gpt.transformer.wte.weight.size(1)
 
@@ -258,27 +274,42 @@ class CaptionModel(nn.Module):
     # --------------- forward --------------
     def forward(
         self,
-        tokens: torch.Tensor,
-        prefix: torch.Tensor,
-        mask: Optional[torch.Tensor] = None,
+        tokens: torch.Tensor,             # [B, T] (テキスト本文トークン)
+        prefix: torch.Tensor,             # [B, prefix_dim]
+        prompt_tokens: Optional[torch.Tensor] = None,  # [B, prompt_length]
+        mask: Optional[torch.Tensor] = None,            # [B, P + prompt_length + T]
         labels: Optional[torch.Tensor] = None,
     ):
         """
-        tokens : [B, T]
+        tokens : [B, T] (本文のみ)
         prefix : [B, prefix_dim]
-        mask   : [B, P+T]  (already prefix 1, text 0/1)  optional
+        prompt_tokens : [B, prompt_length] or None
+        mask   : [B, prefix_length + prompt_length + T]
         """
         B = tokens.size(0)
-        text_emb = self.gpt.transformer.wte(tokens)                    # [B,T,E]
-        prefix_emb = self.prefix_mapper(prefix).view(B, self.prefix_length, -1)
-        full_emb = torch.cat([prefix_emb, text_emb], dim=1)            # [B, P+T, E]
+        device = tokens.device
+
+        # prefix embedding
+        prefix_emb = self.prefix_mapper(prefix).view(B, self.prefix_length, -1)    # [B, P, E]
+
+        # prompt embedding
+        if prompt_tokens is not None and prompt_tokens.size(1) > 0:
+            prompt_emb = self.gpt.transformer.wte(prompt_tokens)                   # [B, prompt_length, E]
+        else:
+            prompt_emb = torch.empty(B, 0, prefix_emb.size(-1), device=device)     # 空テンソル
+
+        # text embedding
+        text_emb = self.gpt.transformer.wte(tokens)                               # [B, T, E]
+
+        # full embedding: prefix + prompt + text
+        full_emb = torch.cat([prefix_emb, prompt_emb, text_emb], dim=1)           # [B, P + prompt_length + T, E]
 
         if labels is not None:
-            dummy = self._dummy_tokens(B, self.prefix_length, tokens.device)
+            dummy = self._dummy_tokens(B, self.prefix_length + self.prompt_length, tokens.device)
             labels = torch.cat([dummy, tokens], dim=1)
 
         out = self.gpt(inputs_embeds=full_emb, attention_mask=mask, labels=labels)
-        return out                                                     # loss / logits
+        return out                                                       # loss / logits
 
 
 # ---------------------------------------------------------------------
@@ -315,6 +346,7 @@ def build_caption_model(
     prefix_dim: int,
     mapping_type: str = "mlp",
     num_layers: int = 4,
+    prompt_length: int = 0,
     only_prefix: bool = True,
     pretrained_path: Optional[str] = None,
 ):
@@ -323,6 +355,7 @@ def build_caption_model(
     """
     model = CaptionModel(
         prefix_length=prefix_length,
+        prompt_length=prompt_length,
         prefix_dim=prefix_dim,
         mapping_type=mapping_type,
         num_layers=num_layers,
@@ -360,22 +393,28 @@ if __name__ == "__main__":
     dummy_dataset = SCADADataset(
         data_path="train.pkl",       # 例 (存在しなくてもエラー確認可)
         prefix_length=10,
+        prompt_length=0,
     )
     model = build_caption_model(
         gpt_variant="gpt_medium",
         prefix_length=10,
         prefix_dim=512,
         mapping_type="mlp",
+        prompt_length=0,
     ).to(DEVICE)
 
     try:
         sample = dummy_dataset[0]
-        tokens, mask, prefix_vec, _ = sample
+        tokens, mask, prefix_vec, prompt_tokens, _ = sample
         tokens = tokens.unsqueeze(0).to(DEVICE)
         mask = mask.unsqueeze(0).to(DEVICE)
         prefix_vec = prefix_vec.unsqueeze(0).to(DEVICE)
+        if prompt_tokens.numel() > 0:
+            prompt_tokens = prompt_tokens.unsqueeze(0).to(DEVICE)
+        else:
+            prompt_tokens = None
 
-        out = model(tokens=tokens, prefix=prefix_vec, mask=mask, labels=tokens)
+        out = model(tokens=tokens, prefix=prefix_vec, prompt_tokens=prompt_tokens, mask=mask, labels=tokens)
         print("forward OK, loss =", out.loss.item())
     except Exception as e:
         print("Self-check skipped (dataset file not found).", e)

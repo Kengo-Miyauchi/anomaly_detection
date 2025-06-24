@@ -2,9 +2,6 @@
 """
 train.py – SCADA × GPT キャプション生成の学習スクリプト
 ===================================================
-* 事前に preprocess.py で作った
-    └ datasets_dpath/<dataset_name>/processed-scada/{train,valid}.pkl
-  を読み込み、CaptionModel を学習する。
 """
 import os
 import sys
@@ -36,6 +33,7 @@ def set_default_args(parser: argparse.ArgumentParser):
 
     # モデル・学習設定
     parser.add_argument("--prefix_length", type=int, default=10)
+    parser.add_argument("--prompt_length", type=int, default=5)  # ← prompt のトークン長（例）
     parser.add_argument("--prefix_dim", type=int, default=512)
     parser.add_argument("--mapping_type", type=str, default="transformer", choices=["mlp", "transformer"])
     parser.add_argument("--num_layers", type=int, default=4)                # TransformerMapper 用
@@ -55,10 +53,11 @@ def set_default_args(parser: argparse.ArgumentParser):
     # GPU
     parser.add_argument("--n_gpu", type=int, default=1)
 
+
 # ---------------------------------------------------------------------
 # 2. 補助関数
 # ---------------------------------------------------------------------
-def make_train_name(args: argparse.Namespace) -> str:
+def make_train_name(args: argparse.Namespace):
     elems = []
     if args.train_name_prefix:
         elems.append(args.train_name_prefix)
@@ -80,11 +79,11 @@ def save_config(args: argparse.Namespace, out_dir: str):
     with open(os.path.join(out_dir, "args.json"), "w") as f:
         json.dump(vars(args), f, indent=4)
 
+
 # ---------------------------------------------------------------------
 # 3. メイン学習ループ
 # ---------------------------------------------------------------------
 def train(args: argparse.Namespace):
-    # ---- デバイス設定 ----
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     avail_gpu = torch.cuda.device_count()
     if avail_gpu < args.n_gpu:
@@ -96,24 +95,24 @@ def train(args: argparse.Namespace):
 
     print(f"[INFO] #GPUs: {args.n_gpu}  |  train BS (total): {args.train_batch_size}")
 
-    # ---- データパス ----
+    # データパス
     pkl_dir = os.path.join(args.datasets_dpath,"processed-scada")
     train_pkl = os.path.join(pkl_dir, "train.pkl")
     valid_pkl = os.path.join(pkl_dir, "valid.pkl")
 
-    # ---- 出力ディレクトリ ----
+    # 出力ディレクトリ
     train_name = make_train_name(args)
     out_dir = os.path.join(args.checkpoints_dpath, train_name)
     os.makedirs(out_dir, exist_ok=True)
     save_config(args, out_dir)
 
-    # ---- Dataset / DataLoader ----
-    train_ds = SCADADataset(train_pkl, prefix_length=args.prefix_length)
-    valid_ds = SCADADataset(valid_pkl, prefix_length=args.prefix_length)
+    # Dataset / DataLoader
+    train_ds = SCADADataset(train_pkl, prefix_length=args.prefix_length, prompt_length=args.prompt_length)  # ← prompt_length対応
+    valid_ds = SCADADataset(valid_pkl, prefix_length=args.prefix_length, prompt_length=args.prompt_length)
     train_dl = DataLoader(train_ds, batch_size=args.train_batch_size, shuffle=True, drop_last=True)
     valid_dl = DataLoader(valid_ds, batch_size=args.eval_batch_size, shuffle=False, drop_last=False)
 
-    # ---- モデル ----
+    # モデル
     model = build_caption_model(
         gpt_variant=args.rinna_gpt_name,
         prefix_length=args.prefix_length,
@@ -128,7 +127,7 @@ def train(args: argparse.Namespace):
     if args.n_gpu > 1:
         model = torch.nn.DataParallel(model)
 
-    # ---- Optimizer / Scheduler ----
+    # Optimizer / Scheduler
     optimizer = AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -136,27 +135,29 @@ def train(args: argparse.Namespace):
         num_training_steps=len(train_dl) * args.epochs,
     )
 
-    # ---------------------------------------------------------------
-    # 4. Epoch ループ
-    # ---------------------------------------------------------------
+    # Epoch ループ
     log = []
     for epoch in range(args.epochs):
         print(f"\n===== Epoch {epoch+1} / {args.epochs} =====")
-        # ----- Train -----
+
+        # Train
         model.train()
         train_losses = []
         pbar = tqdm(train_dl, desc="Train")
-        for tokens, mask, prefix, _, in pbar:
-            tokens, mask, prefix = (
-                tokens.to(device),
-                mask.to(device),
-                prefix.to(device, dtype=torch.float32),
-            )
+        for tokens, mask, prefix, prompt_tokens in pbar:  # prompt_tokens追加想定
+            tokens = tokens.to(device)
+            mask = mask.to(device)
+            prefix = prefix.to(device, dtype=torch.float32)
+            prompt_tokens = prompt_tokens.to(device)
 
             model.zero_grad()
-            outputs = model(tokens=tokens, prefix=prefix, mask=mask)
-            # logits : [B, P+T, V] → caption 部だけ
-            logits = outputs.logits[:, train_ds.prefix_length - 1 : -1]
+            outputs = model(tokens=tokens, prefix=prefix, mask=mask, prompt_tokens=prompt_tokens)
+
+            # logits : [B, P + prompt_length + T, V]
+            # loss計算は prefix_length + prompt_length を除いて tokens部分のみ
+            total_prefix_len = args.prefix_length + args.prompt_length
+            logits = outputs.logits[:, total_prefix_len - 1 : -1]
+
             loss = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)),
                 tokens.flatten(),
@@ -164,6 +165,7 @@ def train(args: argparse.Namespace):
             )
             if args.n_gpu > 1:
                 loss = loss.mean()
+
             loss.backward()
             optimizer.step()
             scheduler.step()
@@ -174,19 +176,21 @@ def train(args: argparse.Namespace):
         avg_train = sum(train_losses) / len(train_losses)
         print(f"[Epoch {epoch+1}] Train Loss: {avg_train:.4f}")
 
-        # ----- Validation -----
+        # Validation
         model.eval()
         val_losses = []
         pbar = tqdm(valid_dl, desc="Valid")
         with torch.no_grad():
-            for tokens, mask, prefix, _ in pbar:
-                tokens, mask, prefix = (
-                    tokens.to(device),
-                    mask.to(device),
-                    prefix.to(device, dtype=torch.float32),
-                )
-                outputs = model(tokens=tokens, prefix=prefix, mask=mask)
-                logits = outputs.logits[:, valid_ds.prefix_length - 1 : -1]
+            for tokens, mask, prefix, prompt_tokens in pbar:
+                tokens = tokens.to(device)
+                mask = mask.to(device)
+                prefix = prefix.to(device, dtype=torch.float32)
+                prompt_tokens = prompt_tokens.to(device)
+
+                outputs = model(tokens=tokens, prefix=prefix, mask=mask, prompt_tokens=prompt_tokens)
+
+                logits = outputs.logits[:, total_prefix_len - 1 : -1]
+
                 loss = F.cross_entropy(
                     logits.reshape(-1, logits.size(-1)),
                     tokens.flatten(),
@@ -200,7 +204,7 @@ def train(args: argparse.Namespace):
         avg_val = sum(val_losses) / len(val_losses)
         print(f"[Epoch {epoch+1}] Valid Loss: {avg_val:.4f}")
 
-        # ----- Checkpoint -----
+        # Checkpoint
         if args.save_every == 0 or (epoch + 1) % args.save_every == 0 or (epoch + 1) == args.epochs:
             ckpt_path = os.path.join(out_dir, f"{epoch+1:03d}.pt")
             torch.save(model.state_dict(), ckpt_path)
@@ -209,7 +213,6 @@ def train(args: argparse.Namespace):
         log.append({"epoch": epoch, "train_loss": avg_train, "valid_loss": avg_val})
         json.dump(log, open(os.path.join(out_dir, "log.json"), "w"), indent=4)
 
-    # best checkpoint
     best_ep = min(log, key=lambda x: x["valid_loss"])["epoch"]
     print(f"Best epoch: {best_ep}")
     return out_dir, os.path.join(out_dir, f"{best_ep:03d}.pt")

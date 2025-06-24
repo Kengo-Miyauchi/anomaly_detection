@@ -7,13 +7,18 @@ inference.py - SCADA ベクトル → GPT2 で説明文を生成
 python inference.py \
     --scada_csv ./sample/001.csv \
     --tabnet_ckpt ./mnt/iot-qnap5/model/haenkaze/tabnet-pretrain-out2023-40dim/pretrained.pth \
-    --cap_ckpt  ./ckpt/scada-run-ep10-bs8-lr2e-05/009.pt
+    --cap_ckpt_dir ./ckpt/scada-run-ep10-bs8-lr2e-05 \
+    --attributes_csv ./attributes.csv \
+    --time_range "12:00~13:00" \
+    --beam_size 5
 """
 import argparse
 import numpy as np
 import torch
 from transformers import T5Tokenizer
-import os, json
+import os
+import json
+import pandas as pd
 
 from model import CaptionModel, build_caption_model   # ← 新しい model.py 由来
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -95,30 +100,32 @@ class Predictor:
         return final_embedding.to(self.device)
 
 
-
-
     # --------------------------------------------------------------
     # 1-2. パブリック API
     # --------------------------------------------------------------
-    def caption(self, csv_path: str, time_range: str = None, beam_size: int = 5, max_len: int = 64, temperature: float = 1.0, no_repeat_ngram_size: int = 3):
+    def caption(self, csv_path: str, time_range: str = None, beam_size: int = 5, max_len: int = 64,
+                temperature: float = 1.0, no_repeat_ngram_size: int = 3, prompt: str = None):
         prefix_vec = self._encode_scada(csv_path)                          # [1,prefix_dim]
-        if time_range is not None:
-            prompt = f"{time_range}のデータに基づいて: "
+
+        if prompt is not None:
+            prompt_text = (time_range + "のデータに基づいて: " if time_range else "") + prompt
         else:
-            prompt = ""
+            prompt_text = (time_range + "のデータに基づいて: " if time_range else "")
 
         with torch.no_grad():
             prefix_embed = self.cap_model.prefix_mapper(prefix_vec)        # [1,P,E]
             prefix_embed = prefix_embed.view(1, self.cap_model.prefix_length, -1)
+
         captions = self._generate_beam(
             embed=prefix_embed,
             beam_size=beam_size,
-            prompt=prompt,
+            prompt=prompt_text if prompt_text else None,
             entry_length=max_len,
             temperature=temperature,
             no_repeat_ngram_size=no_repeat_ngram_size,
         )
         return captions  # 最高スコア 1 件を返す
+
 
     # --------------------------------------------------------------
     # 1-3. ビームサーチ (ClipCap 実装を踏襲)
@@ -216,11 +223,23 @@ def main():
     parser.add_argument("--scada_csv", type=str, required=True, help="CSV file of one SCADA sample")
     parser.add_argument("--tabnet_ckpt", type=str, required=True, help="Path to pretrained TabNet .pth")
     parser.add_argument("--cap_ckpt_dir", type=str, required=True, help="Dir containing args.json & *.pt")
+    parser.add_argument("--attributes_csv", type=str, required=True, help="CSV file listing attribute names")
     parser.add_argument("--time_range", type=str, default="", help="Optional time range string like '12:00~13:00'")
     parser.add_argument("--beam_size", type=int, default=5)
     args = parser.parse_args()
 
-    # ---- 事前学習済み CaptionModel をロード ----
+    # --- 属性CSVから属性語句を読み込み ---
+    df_attr = pd.read_csv(args.attributes_csv)
+    # ここは属性名が1列目にある想定。列名が違うなら df_attr['列名'] に修正してください
+    attr_list = df_attr.iloc[:, 0].dropna().unique().tolist()
+
+    # プロンプト文字列作成
+    prompt = "以下の語句のいずれかを必ず含んで、異常の説明文を生成してください：\n"
+    for attr in attr_list:
+        prompt += f"・{attr}\n"
+    prompt += "\n→ "
+
+    # 事前学習済み CaptionModel をロード
     args_json = os.path.join(args.cap_ckpt_dir, "args.json")
     with open(args_json) as f:
         cfg = json.load(f)
@@ -230,7 +249,6 @@ def main():
     if not pt_files:
         raise FileNotFoundError("No .pt in caption ckpt dir")
     pt_path = os.path.join(args.cap_ckpt_dir, sorted(pt_files)[-1])
-
 
     cap_model = build_caption_model(
         gpt_variant=cfg["rinna_gpt_name"],
@@ -247,20 +265,20 @@ def main():
     )
     tokenizer.pad_token = tokenizer.eos_token  # GPT系はpad_tokenが未定義なので明示
 
-    # ---- TabNet Encoder ----
     tabnet_encoder = load_tabnet_encoder(args.tabnet_ckpt)
 
-    # ---- Predictor ----
     predictor = Predictor(cap_model, tokenizer, tabnet_encoder, device=DEVICE)
-    caption = predictor.caption(
+    captions = predictor.caption(
         csv_path=args.scada_csv,
+        time_range=args.time_range,
         beam_size=args.beam_size,
+        prompt=prompt,
         temperature=0.5,
         max_len=16,
         no_repeat_ngram_size=4,
     )
-    for i in range(len(caption)):
-        print(f"Generated caption {i}:{caption[i]}")
+    for i, c in enumerate(captions):
+        print(f"Generated caption {i}: {c}")
 
 
 if __name__ == "__main__":

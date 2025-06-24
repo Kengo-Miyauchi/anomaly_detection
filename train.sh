@@ -4,8 +4,8 @@ python train.py \
   --dataset_name paired_data \
   --datasets_dpath /mnt/iot-qnap5/miyauchi/data \
   --rinna_gpt_name gpt_medium \
-  --per_gpu_train_batch_size 8 \
-  --per_gpu_eval_batch_size 8 \
+  --per_gpu_train_batch_size 128 \
+  --per_gpu_eval_batch_size 128 \
   --lr 1e-3 \
   --save_every 1 \
   --mapping_type transformer \
