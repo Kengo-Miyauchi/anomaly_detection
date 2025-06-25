@@ -29,6 +29,7 @@ from transformers import AutoModelForCausalLM, T5Tokenizer
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
+
 # ---------------------------------------------------------------------
 # 1. データセット – 事前処理済み pkl を読む
 # ---------------------------------------------------------------------
@@ -48,8 +49,10 @@ class SCADADataset(Dataset):
         prompt_length: int = 0,
         gpt_model_name: str = "rinna/japanese-gpt2-medium",
     ):
-        self.tokenizer = T5Tokenizer.from_pretrained(gpt_model_name)
-        self.tokenizer.pad_token = self.tokenizer.eos_token  # GPT系はpad_tokenが未定義なので明示
+        self.tokenizer = AutoTokenizer.from_pretrained(gpt_model_name)
+        # GPT系はpad_tokenが未定義の場合があるため明示設定
+        if self.tokenizer.pad_token is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.prefix_length = prefix_length
         self.prompt_length = prompt_length
@@ -60,31 +63,25 @@ class SCADADataset(Dataset):
         self.prefixes = packed["scada_embedding"]              # Tensor[N, prefix_dim]
         captions_raw = packed["captions"]                      # List[dict]
         self.captions = [c["caption"] for c in captions_raw]
-        #self.time_ranges = [c["time_range"] for c in captions_raw]
 
-        # ここでprompt_tokensを用意（例：固定プロンプトや属性語句からトークン化して保存済みのはず）
-        # もしpackedに 'prompt_tokens' などなければ後で別実装が必要
-        # ここでは空のprompt_tokensを返す想定（要適宜修正）
+        # prompt_tokens は将来的にここでトークン化して格納可能
         self.prompt_token_list = []
         for c in captions_raw:
-            # 例: c["prompt"] があれば tokenizer.encode して保存するなど
+            # もし c に 'prompt' キーがあれば tokenizer.encode(c['prompt']) で作成可能
             self.prompt_token_list.append(torch.tensor([], dtype=torch.long))
 
-        # --- トークン化 & 事前パディング情報 ---
+        # トークン化 & 事前パディング情報準備
         self.caption_tokens = []
-        self.id2vec = []                                       # index → prefix row id
-        max_len = 0
-        for row in captions_raw:
+        self.id2vec = []  # prefix embedding の行インデックス
+        for idx, row in enumerate(captions_raw):
             ids = torch.tensor(self.tokenizer.encode(row["caption"]), dtype=torch.long)
             self.caption_tokens.append(ids)
-            self.id2vec.append(row["scada_embedding"])
-            max_len = max(max_len, len(ids))
+            self.id2vec.append(idx)  # prefix ベクトルのインデックスを保存
 
         # 動的長にしてもよいが ClipCap 互換で “平均+10σ” を採用
         all_lens = torch.tensor([len(t) for t in self.caption_tokens]).float()
         self.max_seq_len = min(int(all_lens.mean() + all_lens.std() * 10), int(all_lens.max()))
 
-    # -------- Dataset プロトコル --------
     def __len__(self):
         return len(self.caption_tokens)
 
@@ -94,7 +91,6 @@ class SCADADataset(Dataset):
         prompt_tokens = self.prompt_token_list[idx]
         return tokens, mask, prefix_vec, prompt_tokens, self.captions[idx]
 
-    # -------- 内部 util --------
     def _pad_tokens(self, idx: int):
         """負値を一時的に PAD 印として使い、最後に 0 に置換"""
         tokens = self.caption_tokens[idx]
@@ -230,7 +226,7 @@ class CaptionModel(nn.Module):
     """
     * `prefix` (TabNet などの SCADA 埋め込みベクトル)
     * `prompt_tokens` (トークンID列, 形は [B, prompt_length])
-    * `tokens` (T5Tokenizer でエンコードしたキャプション)
+    * `tokens` (AutoTokenizer でエンコードしたキャプション)
     を入力し、Cross-Entropy Loss を返す (train) / logits を返す (eval)。
     """
 
@@ -266,12 +262,10 @@ class CaptionModel(nn.Module):
                 n_layers=num_layers,
             )
 
-    # ---------------- util ----------------
     @staticmethod
     def _dummy_tokens(batch, length, device):
         return torch.zeros(batch, length, dtype=torch.long, device=device)
 
-    # --------------- forward --------------
     def forward(
         self,
         tokens: torch.Tensor,             # [B, T] (テキスト本文トークン)
@@ -309,7 +303,7 @@ class CaptionModel(nn.Module):
             labels = torch.cat([dummy, tokens], dim=1)
 
         out = self.gpt(inputs_embeds=full_emb, attention_mask=mask, labels=labels)
-        return out                                                       # loss / logits
+        return out  # loss / logits
 
 
 # ---------------------------------------------------------------------
@@ -319,6 +313,7 @@ def _latest_checkpoint(path_dir):
     ckpts = [p for p in glob(os.path.join(path_dir, "*.pt")) if not os.path.basename(p).startswith(".")]
     if not ckpts:
         raise FileNotFoundError(path_dir)
+    # チェックポイントファイル名は数字.ptを想定し最大epochを返す
     return max(ckpts, key=lambda p: int(os.path.splitext(os.path.basename(p))[0]))
 
 
@@ -377,12 +372,13 @@ def build_caption_model(
         assert saved_args["mapping_type"] == mapping_type
 
         state = torch.load(ckpt_fpath, map_location="cpu")
-        # DataParallel 対応
+        # DataParallel 対応のため 'module.' 削除
         new_state = OrderedDict((k.replace("module.", ""), v) for k, v in state.items())
         model.load_state_dict(new_state)
         print(f"[INFO] loaded weights from {ckpt_fpath}")
 
     return model
+
 
 
 # ---------------------------------------------------------------------
