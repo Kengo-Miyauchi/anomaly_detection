@@ -20,7 +20,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 from torch.utils.data import Dataset
-from transformers import AutoModelForCausalLM, T5Tokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, LlamaTokenizer
 
 
 # ---------------------------------------------------------------------
@@ -29,59 +29,83 @@ from transformers import AutoModelForCausalLM, T5Tokenizer
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 
-
 # ---------------------------------------------------------------------
 # 1. データセット – 事前処理済み pkl を読む
 # ---------------------------------------------------------------------
 class SCADADataset(Dataset):
-    """
-    train.pkl / valid.pkl などから
-      - tokens:       [seq_len]
-      - mask:         [prefix_len + prompt_len + seq_len]
-      - prefix:       [prefix_dim]   (SCADA 埋め込みベクトル)
-      - caption_str:  str            (デバッグ用・任意)
-    を返す。
-    """
     def __init__(
         self,
-        data_path: str,
-        prefix_length: int,
+        data_path: Optional[str] = None,
+        data_dict: Optional[dict] = None,
+        prefix_length: int = 10,
         prompt_length: int = 0,
         gpt_model_name: str = "rinna/japanese-gpt2-medium",
     ):
-        self.tokenizer = AutoTokenizer.from_pretrained(gpt_model_name)
-        # GPT系はpad_tokenが未定義の場合があるため明示設定
-        if self.tokenizer.pad_token is None:
-            self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.tokenizer = AutoTokenizer.from_pretrained(gpt_model_name, use_fast=False)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
 
         self.prefix_length = prefix_length
         self.prompt_length = prompt_length
 
-        with open(data_path, "rb") as f:
-            packed = pickle.load(f)
+        if data_dict is not None:
+            packed = data_dict
+        elif data_path is not None:
+            with open(data_path, "rb") as f:
+                packed = pickle.load(f)
+        else:
+            raise ValueError("data_path または data_dict のどちらかを指定してください")
 
         self.prefixes = packed["scada_embedding"]              # Tensor[N, prefix_dim]
         captions_raw = packed["captions"]                      # List[dict]
         self.captions = [c["caption"] for c in captions_raw]
 
-        # prompt_tokens は将来的にここでトークン化して格納可能
         self.prompt_token_list = []
         for c in captions_raw:
-            # もし c に 'prompt' キーがあれば tokenizer.encode(c['prompt']) で作成可能
-            self.prompt_token_list.append(torch.tensor([], dtype=torch.long))
+            prompt_text = c.get("prompt", "")
+            prompt_tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
+            self.prompt_token_list.append(torch.tensor(prompt_tokens, dtype=torch.long))
 
-        # トークン化 & 事前パディング情報準備
         self.caption_tokens = []
-        self.id2vec = []  # prefix embedding の行インデックス
-        for idx, row in enumerate(captions_raw):
-            ids = torch.tensor(self.tokenizer.encode(row["caption"]), dtype=torch.long)
+        self.id2vec = []
+        for row in captions_raw:
+            ids = torch.tensor(self.tokenizer.encode(row["caption"], add_special_tokens=False), dtype=torch.long)
             self.caption_tokens.append(ids)
-            self.id2vec.append(idx)  # prefix ベクトルのインデックスを保存
+            self.id2vec.append(row["scada_embedding"])
 
-        # 動的長にしてもよいが ClipCap 互換で “平均+10σ” を採用
         all_lens = torch.tensor([len(t) for t in self.caption_tokens]).float()
         self.max_seq_len = min(int(all_lens.mean() + all_lens.std() * 10), int(all_lens.max()))
 
+    @classmethod
+    def from_dict(cls, data_dict, prefix_length, prompt_length=0, gpt_model_name="rinna/japanese-gpt2-medium"):
+        self = cls.__new__(cls)  # 通常の __init__ を呼ばずにインスタンス生成
+        self.tokenizer = AutoTokenizer.from_pretrained(gpt_model_name, use_fast=False)
+        self.tokenizer.pad_token = self.tokenizer.eos_token
+        self.prefix_length = prefix_length
+        self.prompt_length = prompt_length
+
+        self.prefixes = data_dict["scada_embedding"]              # Tensor[N, prefix_dim]
+        captions_raw = data_dict["captions"]                      # List[dict]
+        self.captions = [c["caption"] for c in captions_raw]
+
+        self.prompt_token_list = []
+        for c in captions_raw:
+            prompt_text = c.get("prompt", "")  # promptがあれば取得、なければ空文字
+            prompt_tokens = self.tokenizer.encode(prompt_text, add_special_tokens=False)
+            self.prompt_token_list.append(torch.tensor(prompt_tokens, dtype=torch.long))
+
+        self.caption_tokens = []
+        self.id2vec = []
+        for row in captions_raw:
+            ids = torch.tensor(self.tokenizer.encode(row["caption"], add_special_tokens=False), dtype=torch.long)
+            self.caption_tokens.append(ids)
+            self.id2vec.append(row["scada_embedding"])
+
+        all_lens = torch.tensor([len(t) for t in self.caption_tokens]).float()
+        self.max_seq_len = min(int(all_lens.mean() + all_lens.std() * 10), int(all_lens.max()))
+
+        return self
+
+    # -------- Dataset プロトコル --------
     def __len__(self):
         return len(self.caption_tokens)
 
@@ -91,6 +115,7 @@ class SCADADataset(Dataset):
         prompt_tokens = self.prompt_token_list[idx]
         return tokens, mask, prefix_vec, prompt_tokens, self.captions[idx]
 
+    # -------- 内部 util --------
     def _pad_tokens(self, idx: int):
         """負値を一時的に PAD 印として使い、最後に 0 に置換"""
         tokens = self.caption_tokens[idx]
@@ -226,7 +251,7 @@ class CaptionModel(nn.Module):
     """
     * `prefix` (TabNet などの SCADA 埋め込みベクトル)
     * `prompt_tokens` (トークンID列, 形は [B, prompt_length])
-    * `tokens` (AutoTokenizer でエンコードしたキャプション)
+    * `tokens` (T5Tokenizer でエンコードしたキャプション)
     を入力し、Cross-Entropy Loss を返す (train) / logits を返す (eval)。
     """
 
@@ -242,8 +267,17 @@ class CaptionModel(nn.Module):
         super().__init__()
         self.prefix_length = prefix_length
         self.prompt_length = prompt_length
-        self.gpt = AutoModelForCausalLM.from_pretrained(gpt_name)
-        embed_dim = self.gpt.transformer.wte.weight.size(1)
+        if "llama" in gpt_name.lower():
+            self.tokenizer = AutoTokenizer.from_pretrained(gpt_name, use_fast=True)
+        else:
+            self.tokenizer = AutoTokenizer.from_pretrained(gpt_name, use_fast=False)
+
+        self.gpt = AutoModelForCausalLM.from_pretrained(
+            gpt_name,
+            torch_dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto"  # 複数GPU対応（任意）
+        )
+        embed_dim = self.gpt.get_input_embeddings().embedding_dim
 
         mapping_type = MappingType(mapping_type.lower())
         if mapping_type == MappingType.MLP:
@@ -262,10 +296,12 @@ class CaptionModel(nn.Module):
                 n_layers=num_layers,
             )
 
+    # ---------------- util ----------------
     @staticmethod
     def _dummy_tokens(batch, length, device):
         return torch.zeros(batch, length, dtype=torch.long, device=device)
 
+    # --------------- forward --------------
     def forward(
         self,
         tokens: torch.Tensor,             # [B, T] (テキスト本文トークン)
@@ -288,12 +324,12 @@ class CaptionModel(nn.Module):
 
         # prompt embedding
         if prompt_tokens is not None and prompt_tokens.size(1) > 0:
-            prompt_emb = self.gpt.transformer.wte(prompt_tokens)                   # [B, prompt_length, E]
+            prompt_emb = self.gpt.get_input_embeddings()(prompt_tokens)                   # [B, prompt_length, E]
         else:
-            prompt_emb = torch.empty(B, 0, prefix_emb.size(-1), device=device)     # 空テンソル
+            prompt_emb = torch.empty(B, 0, text_emb.size(-1), device=device)     # 空テンソル
 
         # text embedding
-        text_emb = self.gpt.transformer.wte(tokens)                               # [B, T, E]
+        text_emb = self.gpt.get_input_embeddings()(tokens)                               # [B, T, E]
 
         # full embedding: prefix + prompt + text
         full_emb = torch.cat([prefix_emb, prompt_emb, text_emb], dim=1)           # [B, P + prompt_length + T, E]
@@ -302,8 +338,11 @@ class CaptionModel(nn.Module):
             dummy = self._dummy_tokens(B, self.prefix_length + self.prompt_length, tokens.device)
             labels = torch.cat([dummy, tokens], dim=1)
 
-        out = self.gpt(inputs_embeds=full_emb, attention_mask=mask, labels=labels)
-        return out  # loss / logits
+        if labels is not None:
+            out = self.gpt(inputs_embeds=full_emb, attention_mask=mask, labels=labels)
+        else:
+            out = self.gpt(inputs_embeds=full_emb, attention_mask=mask)
+        return out                                                       # loss / logits
 
 
 # ---------------------------------------------------------------------
@@ -313,7 +352,6 @@ def _latest_checkpoint(path_dir):
     ckpts = [p for p in glob(os.path.join(path_dir, "*.pt")) if not os.path.basename(p).startswith(".")]
     if not ckpts:
         raise FileNotFoundError(path_dir)
-    # チェックポイントファイル名は数字.ptを想定し最大epochを返す
     return max(ckpts, key=lambda p: int(os.path.splitext(os.path.basename(p))[0]))
 
 
@@ -354,9 +392,12 @@ def build_caption_model(
         prefix_dim=prefix_dim,
         mapping_type=mapping_type,
         num_layers=num_layers,
-        gpt_name=(
-            "rinna/japanese-gpt2-medium" if gpt_variant == "gpt_medium" else "rinna/japanese-gpt-1b"
-        ),
+        # config（train.pyやinference.py）で "llama3" を指定する前提で：
+        gpt_name = {
+            "gpt_medium": "rinna/japanese-gpt2-medium",
+            "gpt_1b": "rinna/japanese-gpt-1b",
+            "llama3": "tokyotech-llm/Llama-3.1-Swallow-8B-Instruct-v0.5",
+        }[gpt_variant]
     )
 
     if only_prefix:
@@ -372,13 +413,12 @@ def build_caption_model(
         assert saved_args["mapping_type"] == mapping_type
 
         state = torch.load(ckpt_fpath, map_location="cpu")
-        # DataParallel 対応のため 'module.' 削除
+        # DataParallel 対応
         new_state = OrderedDict((k.replace("module.", ""), v) for k, v in state.items())
         model.load_state_dict(new_state)
         print(f"[INFO] loaded weights from {ckpt_fpath}")
 
     return model
-
 
 
 # ---------------------------------------------------------------------
