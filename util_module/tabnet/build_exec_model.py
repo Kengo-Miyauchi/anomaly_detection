@@ -51,14 +51,14 @@ class ExecModel:
                 logging.info("Starting TabNet pretraining...")
                 self.fit_model()
                 logging.info("TabNet pretraining finished.")
-                torch.save(self.unsupervised_model, f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained_refit.pth")
+                torch.save(self.unsupervised_model, f"{self.path_to_pretrained}/pretrained_refit.pth")
         else:
-            self.set_log(filepath=f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretraining.log")
+            self.set_log(filepath=f"{self.path_to_pretrained}/pretraining.log")
             self.unsupervised_model=self.set_unsupervised_model()
             logging.info("Starting TabNet pretraining...")
             self.fit_model()
             logging.info("TabNet pretraining finished.")
-            torch.save(self.unsupervised_model, f"/mnt/iot-qnap5/miyauchi/{self.path_to_pretrained}/pretrained.pth")
+            torch.save(self.unsupervised_model, f"{self.path_to_pretrained}/pretrained.pth")
             # self.unsupervised_model.save_model(path_to_pretrained)
     
     # 事前学習モデルの設定
