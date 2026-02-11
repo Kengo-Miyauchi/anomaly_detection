@@ -1,0 +1,24 @@
+# =========================
+# MTFA Pretraining Config
+# =========================
+
+# ----- Model -----
+c_in: 100              # SCADAの入力次元数
+d_model: 512
+e_layers: 3
+fr: 0.4
+tr: 0.5
+sequence_length: 10
+seq_size: 10
+proj_dim: 40
+
+# ----- Training -----
+optimizer_params:
+  lr: 0.001
+max_epochs: 50
+batch_size_pre: 32
+covariance_type: diag
+
+# ----- Logging / Experiment -----
+dataset_name: haenkaze
+model_name: mtfa-pretrain
